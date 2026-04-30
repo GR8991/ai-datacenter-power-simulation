@@ -157,7 +157,7 @@ with tab0:
         st.markdown("### Direct URL")
         st.code(
             "https://zenodo.org/records/10127767"
-            "/files/job_table.parquet",
+            "/files/job_table.parquet?download=1",
             language=None
         )
 
