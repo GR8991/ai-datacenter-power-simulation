@@ -129,32 +129,28 @@ with tab0:
             "official ExaDigiT simulation tool from Oak Ridge "
             "National Laboratory. It provides real supercomputer "
             "job traces that generate realistic AI workload "
-            "power profiles — directly replacing synthetic data."
+            "power profiles."
         )
-        st.markdown("### How It Works — No Upload Needed!")
+        st.markdown("### How It Works")
         st.markdown("**Step 1:** Select **Real RAPS Data** in sidebar")
         st.markdown("**Step 2:** Click **Load RAPS Data** button below")
-        st.markdown(
-            "**Step 3:** Data downloads automatically from Zenodo"
-        )
-        st.markdown("**Step 4:** Data cached — no re-download needed")
-        st.markdown("**Step 5:** Click **RUN SIMULATION**")
+        st.markdown("**Step 3:** Sample dataset loads instantly")
+        st.markdown("**Step 4:** Click **RUN SIMULATION**")
         st.success(
-            "📥 Data fetched directly from Zenodo. "
-            "No file upload required! "
-            "Automatically cached after first download."
+            "📥 Uses a 100-job RAPS-compatible sample dataset "
+            "stored in the repo. Instant load — no download needed!"
         )
 
     with col2:
         st.markdown("### Dataset Info")
         st.markdown("- **Source:** Marconi100 Supercomputer, CINECA Italy")
-        st.markdown("- **Jobs:** Real HPC job scheduling traces")
-        st.markdown("- **Format:** Apache Parquet (columnar)")
-        st.markdown("- **Size:** ~270 MB")
+        st.markdown("- **Format:** RAPS-compatible job trace format")
+        st.markdown("- **Sample Size:** 100 representative jobs")
+        st.markdown("- **Full Dataset:** 231,116 jobs (287 MB)")
         st.markdown("- **License:** Open access via Zenodo")
         st.markdown("- **DOI:** 10.5281/zenodo.10127767")
 
-        st.markdown("### Direct URL")
+        st.markdown("### Full Dataset URL")
         st.code(
             "https://zenodo.org/records/10127767"
             "/files/job_table.parquet?download=1",
@@ -176,7 +172,7 @@ with tab0:
 
     with col_btn1:
         load_raps_btn = st.button(
-            "📥 Load RAPS Data from Zenodo",
+            "📥 Load RAPS Sample Data",
             type="primary",
             use_container_width=True
         )
@@ -191,16 +187,23 @@ with tab0:
         else:
             st.warning("⏳ Not loaded yet")
 
-    # ── Clear cache ────────────────────────────────────────────
-   if load_raps_btn:
+    if clear_btn:
+        for key in ["raps_loaded", "raps_stats", "raps_cols"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        RAPSLoader.clear_cache()
+        st.success("🗑️ Cache cleared!")
+
+    if load_raps_btn:
         try:
-            loader = RAPSLoader(
-                it_load_mw   = it_load_mw,
-                gpu_power_w  = 700,
-                duration_min = sim_duration
-            )
-            stats = loader.get_job_stats()
-            cols  = loader.get_columns()
+            with st.spinner("Loading RAPS sample data..."):
+                loader = RAPSLoader(
+                    it_load_mw   = it_load_mw,
+                    gpu_power_w  = 700,
+                    duration_min = sim_duration
+                )
+                stats = loader.get_job_stats()
+                cols  = loader.get_columns()
 
             st.session_state["raps_loaded"] = True
             st.session_state["raps_stats"]  = stats
@@ -208,9 +211,8 @@ with tab0:
 
             st.success("✅ RAPS sample data loaded successfully!")
             st.info(
-                "📌 Using 100-job sample dataset in RAPS format. "
-                "Full 231K-job dataset available at: "
-                "zenodo.org/records/10127767"
+                "📌 Using 100-job sample in RAPS format. "
+                "Full 231K-job dataset: zenodo.org/records/10127767"
             )
 
             c1, c2, c3, c4 = st.columns(4)
@@ -233,16 +235,15 @@ with tab0:
             st.code(", ".join(cols), language=None)
 
             df_prev = loader.load()
-            st.markdown("### Data Preview")
+            st.markdown("### Data Preview (first 10 rows)")
             st.dataframe(
                 df_prev.head(10),
                 use_container_width=True
             )
 
-            gpu_col = "num_gpus"
-            if gpu_col in df_prev.columns:
+            if "num_gpus" in df_prev.columns:
                 fig_hist = go.Figure(go.Histogram(
-                    x=df_prev[gpu_col],
+                    x=df_prev["num_gpus"],
                     nbinsx=20,
                     marker_color="#00D4FF",
                     opacity=0.8
@@ -258,8 +259,87 @@ with tab0:
                     fig_hist, use_container_width=True
                 )
 
+            if ("start_time" in df_prev.columns
+                    and "end_time" in df_prev.columns):
+                df_prev["duration_h"] = (
+                    (df_prev["end_time"] - df_prev["start_time"])
+                    / 3600
+                )
+                fig_dur = go.Figure(go.Histogram(
+                    x=df_prev["duration_h"].clip(0, 48),
+                    nbinsx=20,
+                    marker_color="#FFB300",
+                    opacity=0.8
+                ))
+                fig_dur.update_layout(
+                    title="Job Duration Distribution (hours)",
+                    xaxis_title="Duration (hours)",
+                    yaxis_title="Job Count",
+                    template="plotly_dark",
+                    height=300
+                )
+                st.plotly_chart(
+                    fig_dur, use_container_width=True
+                )
+
         except Exception as e:
             st.error(f"❌ Error loading RAPS data: {e}")
+
+    elif "raps_stats" in st.session_state:
+        stats = st.session_state["raps_stats"]
+        cols  = st.session_state["raps_cols"]
+        st.info("📋 Showing cached RAPS data stats")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Jobs",
+                  f"{stats['total_jobs']:,}")
+        c2.metric("Columns",
+                  f"{len(stats['columns'])}")
+        c3.metric(
+            "Time Span",
+            f"{stats['time_span_h']} hrs"
+            if stats["time_span_h"] else "N/A"
+        )
+        c4.metric(
+            "Max GPUs",
+            f"{stats['max_gpus']:,}"
+            if stats["max_gpus"] else "N/A"
+        )
+        st.markdown("### Dataset Columns")
+        st.code(", ".join(cols), language=None)
+
+    else:
+        st.info(
+            "👆 Click **Load RAPS Sample Data** to get started."
+        )
+        st.markdown("### Synthetic vs Real Data Comparison")
+        compare_data = {
+            "Feature": [
+                "Data Source",
+                "Job Patterns",
+                "Power Ramps",
+                "Load Drops",
+                "Realism",
+                "Speed"
+            ],
+            "🔢 Synthetic (Phase 1)": [
+                "numpy random",
+                "Regular intervals",
+                "Fixed ramp rate",
+                "Predictable",
+                "Low",
+                "Instant"
+            ],
+            "📂 Real RAPS (Phase 2)": [
+                "RAPS job trace format",
+                "Real HPC scheduling",
+                "Variable job-dependent",
+                "Unpredictable",
+                "High",
+                "Instant (sample)"
+            ]
+        }
+        st.table(pd.DataFrame(compare_data))
+
 # ── About Tab ──────────────────────────────────────────────────
 with tab6:
     st.subheader("ℹ️ About This Tool")
@@ -272,7 +352,7 @@ with tab6:
             "Center powered by a **Gas Generator + BESS**."
         )
         st.markdown("**Phase 1:** Synthetic AI workload profiles")
-        st.markdown("**Phase 2A:** Real ExaDigiT RAPS job trace data")
+        st.markdown("**Phase 2A:** RAPS-compatible job trace data")
         st.markdown(
             "**Phase 2B (coming):** More NVIDIA tests (7, 8, 10)"
         )
@@ -417,7 +497,7 @@ if run_sim:
     with tab1:
         st.subheader("📊 AI Workload Power Demand Profile")
         if use_raps:
-            st.success("📂 Using real ExaDigiT RAPS job trace data")
+            st.success("📂 Using RAPS job trace data")
         else:
             st.info("🔢 Using synthetic workload data")
 
