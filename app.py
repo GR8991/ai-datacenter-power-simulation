@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import sys
 import os
-import tempfile
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,7 +40,6 @@ st.divider()
 with st.sidebar:
     st.header("⚙️ Simulation Config")
 
-    # ── Data Source Toggle ─────────────────────────────────────
     st.subheader("📂 Data Source")
     data_source = st.radio(
         "Select Workload Source",
@@ -99,6 +97,7 @@ with st.sidebar:
     st.markdown("[NVIDIA BESS Guidelines v0.4](https://docs.nvidia.com/datacenter/dsx/BESS-Self-Qualification-Guidelines.html)")
     st.markdown("[ExaDigiT RAPS](https://code.ornl.gov/exadigit/raps)")
     st.markdown("[EPRI DCFlex](https://dcflex.epri.com/)")
+    st.markdown("[Zenodo Dataset](https://zenodo.org/records/10127767)")
 
 # ── Tabs ───────────────────────────────────────────────────────
 tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -111,10 +110,13 @@ tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "ℹ️ About"
 ])
 
-# ── Tab 0: RAPS Data Upload ────────────────────────────────────
+# ── Tab 0: RAPS Data ───────────────────────────────────────────
 with tab0:
     st.subheader("📂 ExaDigiT RAPS Data Integration")
-    st.markdown("**Phase 2A — Real HPC Workload Data from Oak Ridge National Lab**")
+    st.markdown(
+        "**Phase 2A — Real HPC Workload Data "
+        "from Oak Ridge National Lab**"
+    )
 
     col1, col2 = st.columns(2)
 
@@ -122,96 +124,238 @@ with tab0:
         st.markdown("### What is RAPS?")
         st.markdown(
             "RAPS (Resource Allocator and Power Simulator) is the "
-            "official ExaDigiT simulation tool from Oak Ridge National "
-            "Laboratory. It provides real supercomputer job traces "
-            "that generate realistic AI workload power profiles."
+            "official ExaDigiT simulation tool from Oak Ridge "
+            "National Laboratory. It provides real supercomputer "
+            "job traces that generate realistic AI workload "
+            "power profiles — directly replacing synthetic data."
         )
-        st.markdown("### How to Get the Data")
-        st.markdown("**Step 1:** Download the dataset:")
-        st.code(
-            "https://zenodo.org/records/10127767/files/"
-            "job_table.parquet",
-            language=None
+        st.markdown("### How It Works — No Upload Needed!")
+        st.markdown("**Step 1:** Select **Real RAPS Data** in sidebar")
+        st.markdown("**Step 2:** Click **Load RAPS Data** button below")
+        st.markdown(
+            "**Step 3:** Data downloads automatically from Zenodo URL"
         )
-        st.markdown("**Step 2:** Upload the file below")
-        st.markdown("**Step 3:** Select **Real RAPS Data** in sidebar")
-        st.markdown("**Step 4:** Click **RUN SIMULATION**")
+        st.markdown("**Step 4:** Data is cached — no re-download needed")
+        st.markdown("**Step 5:** Click **RUN SIMULATION**")
+        st.success(
+            "📥 Data fetched directly from Zenodo. "
+            "No file upload required! Automatically cached "
+            "after first download."
+        )
 
     with col2:
         st.markdown("### Dataset Info")
         st.markdown("- **Source:** Marconi100 Supercomputer, CINECA Italy")
         st.markdown("- **Jobs:** Real HPC job scheduling traces")
-        st.markdown("- **Format:** Parquet (columnar data)")
+        st.markdown("- **Format:** Apache Parquet (columnar)")
         st.markdown("- **Size:** ~270 MB")
         st.markdown("- **License:** Open access via Zenodo")
         st.markdown("- **DOI:** 10.5281/zenodo.10127767")
 
-    st.divider()
-    st.markdown("### Upload RAPS Job Table")
-
-    uploaded_file = st.file_uploader(
-        "Upload job_table.parquet",
-        type=["parquet"],
-        help="Download from zenodo.org/records/10127767"
-    )
-
-    if uploaded_file is not None:
-        st.session_state["raps_file"] = uploaded_file
-
-        with st.spinner("Loading RAPS data..."):
-            try:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".parquet"
-                ) as tmp:
-                    tmp.write(uploaded_file.read())
-                    tmp_path = tmp.name
-
-                st.session_state["raps_path"] = tmp_path
-
-                loader  = RAPSLoader(
-                    tmp_path, it_load_mw,
-                    gpu_power_w=700,
-                    duration_min=sim_duration
-                )
-                stats   = loader.get_job_stats()
-                cols    = loader.get_columns()
-
-                st.success("✅ RAPS data loaded successfully!")
-
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Total Jobs",    f"{stats['total_jobs']:,}")
-                c2.metric("Columns",       f"{len(stats['columns'])}")
-                c3.metric("Time Span",
-                          f"{stats['time_span_h']} hrs"
-                          if stats['time_span_h'] else "N/A")
-                c4.metric("Max GPUs",
-                          f"{stats['max_gpus']:,}"
-                          if stats['max_gpus'] else "N/A")
-
-                st.markdown("### Dataset Columns")
-                st.code(", ".join(cols), language=None)
-
-                st.markdown("### Preview (first 10 rows)")
-                df_preview = pd.read_parquet(tmp_path)
-                st.dataframe(
-                    df_preview.head(10),
-                    use_container_width=True
-                )
-
-            except Exception as e:
-                st.error(f"❌ Error loading RAPS data: {e}")
-    else:
-        st.warning(
-            "No file uploaded yet. Using synthetic data until "
-            "you upload job_table.parquet"
+        st.markdown("### Direct URL")
+        st.code(
+            "https://zenodo.org/records/10127767"
+            "/files/job_table.parquet",
+            language=None
         )
-        st.markdown("### Or use sample RAPS-like data")
-        if st.button("Generate Sample RAPS Profile"):
-            st.session_state["use_sample_raps"] = True
+
+        st.markdown("### Why Real Data Matters")
+        st.markdown(
+            "Real HPC job traces capture actual workload patterns — "
+            "unpredictable start/stop times, varied GPU counts, "
+            "and realistic power ramps — that synthetic data "
+            "cannot replicate."
+        )
+
+    st.divider()
+    st.markdown("### Load RAPS Data")
+
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+
+    with col_btn1:
+        load_raps_btn = st.button(
+            "📥 Load RAPS Data from Zenodo",
+            type="primary",
+            use_container_width=True
+        )
+    with col_btn2:
+        clear_btn = st.button(
+            "🗑️ Clear Cached Data",
+            use_container_width=True
+        )
+    with col_btn3:
+        if "raps_loaded" in st.session_state:
+            st.success("✅ RAPS data loaded & cached!")
+        else:
+            st.warning("⏳ Not loaded yet")
+
+    if clear_btn:
+        for key in ["raps_loaded", "raps_stats", "raps_cols"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        RAPSLoader._download_data.clear()
+        st.success("🗑️ Cache cleared! Click Load to re-download.")
+
+    if load_raps_btn:
+        try:
+            with st.spinner(
+                "📥 Downloading from Zenodo (~270MB)... "
+                "This may take 1-2 minutes..."
+            ):
+                loader = RAPSLoader(
+                    it_load_mw   = it_load_mw,
+                    gpu_power_w  = 700,
+                    duration_min = sim_duration
+                )
+                stats = loader.get_job_stats()
+                cols  = loader.get_columns()
+
+            st.session_state["raps_loaded"] = True
+            st.session_state["raps_stats"]  = stats
+            st.session_state["raps_cols"]   = cols
+
             st.success(
-                "Sample RAPS profile will be used. "
-                "Select Real RAPS Data in sidebar and run simulation."
+                "✅ RAPS data loaded successfully from Zenodo!"
             )
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Jobs",
+                      f"{stats['total_jobs']:,}")
+            c2.metric("Columns",
+                      f"{len(stats['columns'])}")
+            c3.metric(
+                "Time Span",
+                f"{stats['time_span_h']} hrs"
+                if stats["time_span_h"] else "N/A"
+            )
+            c4.metric(
+                "Max GPUs",
+                f"{stats['max_gpus']:,}"
+                if stats["max_gpus"] else "N/A"
+            )
+
+            st.markdown("### Dataset Columns Detected")
+            st.code(", ".join(cols), language=None)
+
+            st.markdown("### Data Preview (first 10 rows)")
+            path, _ = RAPSLoader._download_data()
+            df_prev = pd.read_parquet(path)
+            st.dataframe(
+                df_prev.head(10),
+                use_container_width=True
+            )
+
+            st.markdown("### Power Distribution by GPU Count")
+            if any(c in df_prev.columns
+                   for c in ["num_gpus", "gpus", "nGPUs"]):
+                gpu_col = next(
+                    c for c in ["num_gpus", "gpus", "nGPUs"]
+                    if c in df_prev.columns
+                )
+                fig_hist = go.Figure(go.Histogram(
+                    x=df_prev[gpu_col],
+                    nbinsx=50,
+                    marker_color="#00D4FF",
+                    opacity=0.8
+                ))
+                fig_hist.update_layout(
+                    title="GPU Count Distribution Across Jobs",
+                    xaxis_title="Number of GPUs per Job",
+                    yaxis_title="Job Count",
+                    template="plotly_dark",
+                    height=350
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
+
+            st.markdown("### Job Duration Distribution")
+            if ("start_time" in df_prev.columns
+                    and "end_time" in df_prev.columns):
+                df_prev["duration_h"] = (
+                    (df_prev["end_time"] - df_prev["start_time"])
+                    / 3600
+                )
+                fig_dur = go.Figure(go.Histogram(
+                    x=df_prev["duration_h"].clip(0, 48),
+                    nbinsx=50,
+                    marker_color="#FFB300",
+                    opacity=0.8
+                ))
+                fig_dur.update_layout(
+                    title="Job Duration Distribution (hours)",
+                    xaxis_title="Duration (hours)",
+                    yaxis_title="Job Count",
+                    template="plotly_dark",
+                    height=350
+                )
+                st.plotly_chart(fig_dur, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"❌ Error loading RAPS data: {e}")
+            st.warning(
+                "💡 Possible reasons:\n"
+                "- Streamlit Cloud outbound internet blocked\n"
+                "- Zenodo temporarily unavailable\n"
+                "- File size too large for memory\n\n"
+                "Try switching to Synthetic data mode."
+            )
+
+    elif "raps_stats" in st.session_state:
+        stats = st.session_state["raps_stats"]
+        cols  = st.session_state["raps_cols"]
+
+        st.info("📋 Showing cached RAPS data stats")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Jobs",
+                  f"{stats['total_jobs']:,}")
+        c2.metric("Columns",
+                  f"{len(stats['columns'])}")
+        c3.metric(
+            "Time Span",
+            f"{stats['time_span_h']} hrs"
+            if stats["time_span_h"] else "N/A"
+        )
+        c4.metric(
+            "Max GPUs",
+            f"{stats['max_gpus']:,}"
+            if stats["max_gpus"] else "N/A"
+        )
+        st.markdown("### Dataset Columns")
+        st.code(", ".join(cols), language=None)
+
+    else:
+        st.info(
+            "👆 Click **Load RAPS Data from Zenodo** to fetch "
+            "real HPC job traces. Until then, simulation uses "
+            "synthetic data."
+        )
+        st.markdown("### Synthetic vs Real Data Comparison")
+        compare_data = {
+            "Feature": [
+                "Data Source",
+                "Job Patterns",
+                "Power Ramps",
+                "Load Drops",
+                "Realism",
+                "Speed"
+            ],
+            "🔢 Synthetic (Phase 1)": [
+                "numpy random",
+                "Regular intervals",
+                "Fixed ramp rate",
+                "Predictable",
+                "Low",
+                "Instant"
+            ],
+            "📂 Real RAPS (Phase 2)": [
+                "Zenodo / Oak Ridge NL",
+                "Real HPC scheduling",
+                "Variable — job-dependent",
+                "Unpredictable",
+                "High",
+                "~1-2 min download"
+            ]
+        }
+        st.table(pd.DataFrame(compare_data))
 
 # ── About Tab ──────────────────────────────────────────────────
 with tab6:
@@ -229,6 +373,13 @@ with tab6:
         st.markdown("**Phase 2B (coming):** More NVIDIA tests (7, 8, 10)")
         st.markdown("**Phase 2C (coming):** Animated power flow diagram")
 
+        st.markdown("### Key Question Answered")
+        st.markdown(
+            "> When AI load suddenly drops, does the BESS "
+            "protect the gas generator — or do we need "
+            "dummy load banks?"
+        )
+
     with col2:
         st.markdown("### NVIDIA Tests Implemented")
         test_data = {
@@ -238,7 +389,8 @@ with tab6:
                 "AI Buffering Proxy (20% IT load/sec)",
                 "Generator Following (droop response)",
                 "SOC Drift (24h energy management)"
-            ]
+            ],
+            "Status": ["✅ Live", "✅ Live", "✅ Live", "✅ Live"]
         }
         st.table(pd.DataFrame(test_data))
 
@@ -255,11 +407,36 @@ with tab6:
         )
 
     st.divider()
+    st.markdown("### Roadmap")
+    roadmap = {
+        "Phase": [
+            "Phase 1", "Phase 2A", "Phase 2B", "Phase 2C"
+        ],
+        "Feature": [
+            "Synthetic simulation + NVIDIA Tests 2,4,9,11",
+            "Real RAPS data from Zenodo",
+            "More NVIDIA Tests (7, 8, 10)",
+            "Animated power flow diagram"
+        ],
+        "Status": [
+            "✅ Complete",
+            "✅ Complete",
+            "🔜 Coming",
+            "🔜 Coming"
+        ]
+    }
+    st.table(pd.DataFrame(roadmap))
+
+    st.divider()
     st.markdown("### References")
-    st.markdown("- NVIDIA BESS Self-Qualification Guidelines v0.4 (February 2026)")
+    st.markdown(
+        "- NVIDIA BESS Self-Qualification Guidelines v0.4 "
+        "(February 2026)"
+    )
     st.markdown("- ExaDigiT RAPS — Oak Ridge National Laboratory")
     st.markdown("- EPRI DCFlex Initiative")
     st.markdown("- IEEE 2800 / IEEE 1547-2018")
+    st.markdown("- Zenodo Dataset DOI: 10.5281/zenodo.10127767")
 
 # ── Run Simulation ─────────────────────────────────────────────
 if run_sim:
@@ -272,20 +449,18 @@ if run_sim:
             }
             gpu_power_w = gpu_map[gpu_power_kw]
 
-            # ── Choose data source ─────────────────────────────
             use_raps = (
                 "Real RAPS" in data_source
-                and "raps_path" in st.session_state
+                and "raps_loaded" in st.session_state
             )
 
             if use_raps:
                 load_model = RAPSLoader(
-                    parquet_path = st.session_state["raps_path"],
                     it_load_mw   = it_load_mw,
                     gpu_power_w  = gpu_power_w,
                     duration_min = sim_duration
                 )
-                data_label = "Real RAPS Data (ExaDigiT)"
+                data_label = "📂 Real RAPS Data (ExaDigiT / Zenodo)"
             else:
                 load_model = AILoadProfile(
                     it_load_mw    = it_load_mw,
@@ -294,7 +469,7 @@ if run_sim:
                     ramp_rate_pct = ramp_rate,
                     duration_min  = sim_duration
                 )
-                data_label = "Synthetic Data"
+                data_label = "🔢 Synthetic Data"
 
             gen_model = GasGenerator(
                 rated_mw        = gen_rated_mw,
@@ -317,7 +492,10 @@ if run_sim:
             df      = results["timeseries"]
             tests   = results["nvidia_tests"]
 
-            st.success(f"✅ Simulation complete! Data source: {data_label}")
+            st.success(
+                f"✅ Simulation complete! "
+                f"Data source: {data_label}"
+            )
 
         except Exception as e:
             st.error(f"❌ Simulation error: {e}")
@@ -331,13 +509,19 @@ if run_sim:
         else:
             st.info("🔢 Using synthetic workload data")
 
-        st.caption("NVIDIA Test 4: Ramp rate must be <= 20% IT load/second")
+        st.caption(
+            "NVIDIA Test 4: Ramp rate must be <= 20% IT load/second"
+        )
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Peak Load",        f"{df['it_load_mw'].max():.1f} MW")
-        c2.metric("Min Load",         f"{df['it_load_mw'].min():.1f} MW")
-        c3.metric("Avg Load",         f"{df['it_load_mw'].mean():.1f} MW")
-        c4.metric("Load Drop Events", f"{int(results['num_drop_events'])}")
+        c1.metric("Peak Load",
+                  f"{df['it_load_mw'].max():.1f} MW")
+        c2.metric("Min Load",
+                  f"{df['it_load_mw'].min():.1f} MW")
+        c3.metric("Avg Load",
+                  f"{df['it_load_mw'].mean():.1f} MW")
+        c4.metric("Load Drop Events",
+                  f"{int(results['num_drop_events'])}")
 
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(
@@ -470,17 +654,22 @@ if run_sim:
         )
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Final SOC",       f"{df['soc_pct'].iloc[-1]:.1f}%")
-        c2.metric("SOC Drift",       f"{results['soc_drift']:.2f}%",
+        c1.metric("Final SOC",
+                  f"{df['soc_pct'].iloc[-1]:.1f}%")
+        c2.metric("SOC Drift",
+                  f"{results['soc_drift']:.2f}%",
                   delta="Pass if <= 5%")
-        c3.metric("Energy Absorbed", f"{results['energy_absorbed_mwh']:.2f} MWh")
-        c4.metric("Cost Saving",     f"${results['cost_saving_usd']:,.0f}")
+        c3.metric("Energy Absorbed",
+                  f"{results['energy_absorbed_mwh']:.2f} MWh")
+        c4.metric("Cost Saving",
+                  f"${results['cost_saving_usd']:,.0f}")
 
         fig3 = make_subplots(
             rows=2, cols=1,
             subplot_titles=(
                 "BESS State of Charge (%)",
-                "BESS Power Flow — Positive=Charging, Negative=Discharging"
+                "BESS Power Flow — Positive=Charging, "
+                "Negative=Discharging"
             )
         )
         fig3.add_trace(go.Scatter(
@@ -492,11 +681,13 @@ if run_sim:
         ), row=1, col=1)
         fig3.add_hline(
             y=soc_max, line_dash="dash", line_color="red",
-            annotation_text=f"SOC Max {soc_max}%", row=1, col=1
+            annotation_text=f"SOC Max {soc_max}%",
+            row=1, col=1
         )
         fig3.add_hline(
             y=soc_min, line_dash="dash", line_color="orange",
-            annotation_text=f"SOC Min {soc_min}%", row=1, col=1
+            annotation_text=f"SOC Min {soc_min}%",
+            row=1, col=1
         )
         fig3.add_trace(go.Scatter(
             x=df["time_s"], y=df["bess_power_mw"],
@@ -522,7 +713,7 @@ if run_sim:
     with tab4:
         st.subheader("⚖️ BESS Charging vs Dummy Load Bank")
         st.caption(
-            "How much surplus power was stored in BESS "
+            "How much surplus power stored in BESS "
             "vs wasted as heat in dummy loads"
         )
 
@@ -562,7 +753,9 @@ if run_sim:
 
         with col2:
             fig_bar = go.Figure(go.Bar(
-                x=["BESS Absorbed", "Dummy Load Wasted", "Gen Reduced"],
+                x=["BESS Absorbed",
+                   "Dummy Load Wasted",
+                   "Gen Reduced"],
                 y=[
                     results["energy_absorbed_mwh"],
                     results["dummy_load_mwh"],
@@ -633,9 +826,13 @@ if run_sim:
         c1.metric("Tests Passed", f"{pass_count} / {total}")
         c2.metric(
             "Overall Status",
-            "QUALIFIED" if pass_count == total else "NOT QUALIFIED"
+            "QUALIFIED" if pass_count == total
+            else "NOT QUALIFIED"
         )
-        c3.metric("Compliance Score", f"{pass_count / total * 100:.0f}%")
+        c3.metric(
+            "Compliance Score",
+            f"{pass_count / total * 100:.0f}%"
+        )
 
         st.divider()
 
@@ -655,7 +852,9 @@ if run_sim:
                 with col2:
                     st.markdown("**Measured Values:**")
                     for k, v in test_result["measured"].items():
-                        ok   = test_result.get("details", {}).get(k, True)
+                        ok   = test_result.get(
+                            "details", {}
+                        ).get(k, True)
                         tick = "✅" if ok else "❌"
                         st.write(f"{tick} {k}: `{v}`")
 
@@ -687,7 +886,10 @@ else:
             "and click RUN SIMULATION"
         )
         st.markdown("### How to Use")
-        st.markdown("1. Choose **Data Source** in sidebar (Synthetic or RAPS)")
+        st.markdown(
+            "1. Choose **Data Source** in sidebar "
+            "(Synthetic or Real RAPS)"
+        )
         st.markdown("2. Set **AI Data Center** parameters")
         st.markdown("3. Configure **Gas Generator** settings")
         st.markdown("4. Set **BESS** parameters")
@@ -699,6 +901,10 @@ else:
     with tab3:
         st.info("👈 Run simulation to see BESS SOC and power flow")
     with tab4:
-        st.info("👈 Run simulation to see BESS vs Dummy Load comparison")
+        st.info(
+            "👈 Run simulation to see BESS vs Dummy Load comparison"
+        )
     with tab5:
-        st.info("👈 Run simulation to see NVIDIA qualification test results")
+        st.info(
+            "👈 Run simulation to see NVIDIA qualification test results"
+        )
