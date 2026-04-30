@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import os
 import tempfile
-import requests
 import streamlit as st
 
 ZENODO_URL = (
@@ -16,10 +15,11 @@ class RAPSLoader:
     directly from Zenodo URL — no file upload needed.
     """
 
-    def __init__(self, it_load_mw,
-                 gpu_power_w=700,
-                 duration_min=30,
-                 parquet_path=None):
+    def __init__(self,
+                 it_load_mw,
+                 gpu_power_w  = 700,
+                 duration_min = 30,
+                 parquet_path = None):      # ← optional now
         self.it_load_mw   = it_load_mw
         self.gpu_power_w  = gpu_power_w
         self.duration_s   = duration_min * 60
@@ -33,29 +33,31 @@ class RAPSLoader:
         Download job_table.parquet from Zenodo.
         Cached so it only downloads once per session.
         """
+        import requests
         try:
-            response = requests.get(ZENODO_URL, stream=True, timeout=120)
+            response = requests.get(
+                ZENODO_URL, stream=True, timeout=180
+            )
             response.raise_for_status()
 
             tmp = tempfile.NamedTemporaryFile(
                 delete=False, suffix=".parquet"
             )
-            total    = 0
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
+            for chunk in response.iter_content(
+                chunk_size=1024 * 1024
+            ):
                 if chunk:
                     tmp.write(chunk)
-                    total += len(chunk)
             tmp.close()
-            return tmp.name, total
+            return tmp.name, os.path.getsize(tmp.name)
 
         except Exception as e:
             raise RuntimeError(
-                f"Failed to download RAPS data: {e}. "
-                "Check your internet connection."
+                f"Failed to download RAPS data from Zenodo: {e}"
             )
 
     def _get_path(self):
-        """Return path to parquet — from cache or download."""
+        """Return path to parquet — use provided or download."""
         if self.parquet_path and os.path.exists(self.parquet_path):
             return self.parquet_path
         path, _ = self._download_data()
@@ -75,14 +77,16 @@ class RAPSLoader:
         """Return summary statistics about the dataset."""
         df    = self.load()
         stats = {
-            "total_jobs": len(df),
-            "columns":    list(df.columns),
+            "total_jobs":  len(df),
+            "columns":     list(df.columns),
             "time_span_h": None,
             "max_gpus":    None,
         }
-        if "start_time" in df.columns and "end_time" in df.columns:
+        if ("start_time" in df.columns
+                and "end_time" in df.columns):
             span = (
-                df["end_time"].max() - df["start_time"].min()
+                df["end_time"].max()
+                - df["start_time"].min()
             )
             stats["time_span_h"] = round(float(span) / 3600, 1)
 
@@ -102,48 +106,67 @@ class RAPSLoader:
         df_jobs = self.load()
 
         # ── Normalize timestamps to start from 0 ───────────────
-        for start_col in ["start_time", "start", "submit_time"]:
-            if start_col in df_jobs.columns:
-                df_jobs = df_jobs.copy()
-                min_t   = df_jobs[start_col].min()
-                df_jobs[start_col] = df_jobs[start_col] - min_t
+        start_col = None
+        for c in ["start_time", "start", "submit_time"]:
+            if c in df_jobs.columns:
+                start_col = c
                 break
 
-        for end_col in ["end_time", "end", "finish_time"]:
-            if end_col in df_jobs.columns:
-                min_t = df_jobs[end_col].min()
-                df_jobs[end_col] = df_jobs[end_col] - min_t
+        end_col = None
+        for c in ["end_time", "end", "finish_time"]:
+            if c in df_jobs.columns:
+                end_col = c
                 break
+
+        if start_col:
+            df_jobs = df_jobs.copy()
+            df_jobs[start_col] = (
+                df_jobs[start_col] - df_jobs[start_col].min()
+            )
+        if end_col:
+            df_jobs = df_jobs.copy()
+            df_jobs[end_col] = (
+                df_jobs[end_col] - df_jobs[end_col].min()
+            )
 
         # ── Build time array ───────────────────────────────────
         time_s = np.arange(0, self.duration_s, self.dt)
         power  = np.zeros(len(time_s))
 
         # ── Get max GPU count for scaling ──────────────────────
-        max_gpus = 1
-        for col in ["num_gpus", "gpus", "nGPUs"]:
-            if col in df_jobs.columns:
-                max_gpus = max(float(df_jobs[col].max()), 1)
+        gpu_col  = None
+        for c in ["num_gpus", "gpus", "nGPUs"]:
+            if c in df_jobs.columns:
+                gpu_col = c
                 break
 
-        max_possible_mw = (max_gpus * self.gpu_power_w) / 1e6
-        scale = self.it_load_mw / max(max_possible_mw, 0.001)
+        max_gpus = float(df_jobs[gpu_col].max()) if gpu_col else 1.0
+        max_mw   = (max_gpus * self.gpu_power_w) / 1e6
+        scale    = self.it_load_mw / max(max_mw, 0.001)
 
         # ── Fill power for each active job ─────────────────────
         for _, job in df_jobs.iterrows():
-            start = self._get_col(
-                job, ["start_time", "start", "submit_time"], 0
+            start = float(
+                self._get_col(
+                    job,
+                    ["start_time", "start", "submit_time"],
+                    0
+                )
             )
-            end   = self._get_col(
-                job, ["end_time", "end", "finish_time"], 0
+            end   = float(
+                self._get_col(
+                    job,
+                    ["end_time", "end", "finish_time"],
+                    0
+                )
             )
-            gpus  = self._get_col(
-                job, ["num_gpus", "gpus", "nGPUs"], 0
+            gpus  = float(
+                self._get_col(
+                    job,
+                    ["num_gpus", "gpus", "nGPUs"],
+                    0
+                )
             )
-
-            start = float(start)
-            end   = float(end)
-            gpus  = float(gpus)
 
             if end <= start or gpus <= 0:
                 continue
@@ -154,11 +177,11 @@ class RAPSLoader:
             if t_start >= len(time_s):
                 continue
 
-            job_power_mw = (gpus * self.gpu_power_w) / 1e6 * scale
+            job_mw = (gpus * self.gpu_power_w) / 1e6 * scale
 
             for t in range(t_start, t_end + 1):
                 if t < len(power):
-                    power[t] += job_power_mw
+                    power[t] += job_mw
 
         # ── Clip and smooth ────────────────────────────────────
         power = np.clip(power, 0, self.it_load_mw)
