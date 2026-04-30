@@ -5,7 +5,7 @@ import tempfile
 
 
 ZENODO_URL = (
-    "https://zenodo.org/records/10127767/files/job_table.parquet"
+    "https://zenodo.org/records/10127767/files/job_table.parquet?download=1"
 )
 
 # Module-level cache — persists across Streamlit reruns
