@@ -192,34 +192,25 @@ with tab0:
             st.warning("⏳ Not loaded yet")
 
     # ── Clear cache ────────────────────────────────────────────
-    if clear_btn:
-        for key in ["raps_loaded", "raps_stats", "raps_cols"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        RAPSLoader.clear_cache()
-        st.success("🗑️ Cache cleared! Click Load to re-download.")
-
-    # ── Load RAPS data ─────────────────────────────────────────
-    if load_raps_btn:
+   if load_raps_btn:
         try:
-            with st.spinner(
-                "📥 Downloading from Zenodo (~270MB)... "
-                "This may take 1-2 minutes..."
-            ):
-                loader = RAPSLoader(
-                    it_load_mw   = it_load_mw,
-                    gpu_power_w  = 700,
-                    duration_min = sim_duration
-                )
-                stats = loader.get_job_stats()
-                cols  = loader.get_columns()
+            loader = RAPSLoader(
+                it_load_mw   = it_load_mw,
+                gpu_power_w  = 700,
+                duration_min = sim_duration
+            )
+            stats = loader.get_job_stats()
+            cols  = loader.get_columns()
 
             st.session_state["raps_loaded"] = True
             st.session_state["raps_stats"]  = stats
             st.session_state["raps_cols"]   = cols
 
-            st.success(
-                "✅ RAPS data loaded successfully from Zenodo!"
+            st.success("✅ RAPS sample data loaded successfully!")
+            st.info(
+                "📌 Using 100-job sample dataset in RAPS format. "
+                "Full 231K-job dataset available at: "
+                "zenodo.org/records/10127767"
             )
 
             c1, c2, c3, c4 = st.columns(4)
@@ -238,26 +229,21 @@ with tab0:
                 if stats["max_gpus"] else "N/A"
             )
 
-            st.markdown("### Dataset Columns Detected")
+            st.markdown("### Dataset Columns")
             st.code(", ".join(cols), language=None)
 
-            st.markdown("### Data Preview (first 10 rows)")
-            path, _ = RAPSLoader._download_data()
-            df_prev = pd.read_parquet(path)
+            df_prev = loader.load()
+            st.markdown("### Data Preview")
             st.dataframe(
                 df_prev.head(10),
                 use_container_width=True
             )
 
-            st.markdown("### GPU Count Distribution")
-            gpu_col = next(
-                (c for c in ["num_gpus", "gpus", "nGPUs"]
-                 if c in df_prev.columns), None
-            )
-            if gpu_col:
+            gpu_col = "num_gpus"
+            if gpu_col in df_prev.columns:
                 fig_hist = go.Figure(go.Histogram(
                     x=df_prev[gpu_col],
-                    nbinsx=50,
+                    nbinsx=20,
                     marker_color="#00D4FF",
                     opacity=0.8
                 ))
@@ -266,119 +252,14 @@ with tab0:
                     xaxis_title="Number of GPUs per Job",
                     yaxis_title="Job Count",
                     template="plotly_dark",
-                    height=350
+                    height=300
                 )
                 st.plotly_chart(
                     fig_hist, use_container_width=True
                 )
 
-            st.markdown("### Job Duration Distribution")
-            start_col = next(
-                (c for c in
-                 ["start_time", "start", "submit_time"]
-                 if c in df_prev.columns), None
-            )
-            end_col = next(
-                (c for c in
-                 ["end_time", "end", "finish_time"]
-                 if c in df_prev.columns), None
-            )
-            if start_col and end_col:
-                try:
-                    start_s = RAPSLoader._to_seconds(
-                        df_prev[start_col]
-                    )
-                    end_s   = RAPSLoader._to_seconds(
-                        df_prev[end_col]
-                    )
-                    duration_h = (end_s - start_s) / 3600
-                    fig_dur = go.Figure(go.Histogram(
-                        x=duration_h.clip(0, 48),
-                        nbinsx=50,
-                        marker_color="#FFB300",
-                        opacity=0.8
-                    ))
-                    fig_dur.update_layout(
-                        title="Job Duration Distribution (hours)",
-                        xaxis_title="Duration (hours)",
-                        yaxis_title="Job Count",
-                        template="plotly_dark",
-                        height=350
-                    )
-                    st.plotly_chart(
-                        fig_dur, use_container_width=True
-                    )
-                except Exception:
-                    pass
-
         except Exception as e:
             st.error(f"❌ Error loading RAPS data: {e}")
-            st.warning(
-                "💡 Possible reasons:\n"
-                "- Streamlit Cloud outbound internet blocked\n"
-                "- Zenodo temporarily unavailable\n"
-                "- File size too large for memory\n\n"
-                "Try switching to Synthetic data mode."
-            )
-
-    elif "raps_stats" in st.session_state:
-        stats = st.session_state["raps_stats"]
-        cols  = st.session_state["raps_cols"]
-
-        st.info("📋 Showing cached RAPS data stats")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Jobs",
-                  f"{stats['total_jobs']:,}")
-        c2.metric("Columns",
-                  f"{len(stats['columns'])}")
-        c3.metric(
-            "Time Span",
-            f"{stats['time_span_h']} hrs"
-            if stats["time_span_h"] else "N/A"
-        )
-        c4.metric(
-            "Max GPUs",
-            f"{stats['max_gpus']:,}"
-            if stats["max_gpus"] else "N/A"
-        )
-        st.markdown("### Dataset Columns")
-        st.code(", ".join(cols), language=None)
-
-    else:
-        st.info(
-            "👆 Click **Load RAPS Data from Zenodo** to fetch "
-            "real HPC job traces. Until then, simulation "
-            "uses synthetic data."
-        )
-        st.markdown("### Synthetic vs Real Data Comparison")
-        compare_data = {
-            "Feature": [
-                "Data Source",
-                "Job Patterns",
-                "Power Ramps",
-                "Load Drops",
-                "Realism",
-                "Speed"
-            ],
-            "🔢 Synthetic (Phase 1)": [
-                "numpy random",
-                "Regular intervals",
-                "Fixed ramp rate",
-                "Predictable",
-                "Low",
-                "Instant"
-            ],
-            "📂 Real RAPS (Phase 2)": [
-                "Zenodo / Oak Ridge NL",
-                "Real HPC scheduling",
-                "Variable job-dependent",
-                "Unpredictable",
-                "High",
-                "~1-2 min download"
-            ]
-        }
-        st.table(pd.DataFrame(compare_data))
-
 # ── About Tab ──────────────────────────────────────────────────
 with tab6:
     st.subheader("ℹ️ About This Tool")
