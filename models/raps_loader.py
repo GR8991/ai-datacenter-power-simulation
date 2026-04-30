@@ -19,7 +19,7 @@ class RAPSLoader:
                  it_load_mw,
                  gpu_power_w  = 700,
                  duration_min = 30,
-                 parquet_path = None):      # ← optional now
+                 parquet_path = None):
         self.it_load_mw   = it_load_mw
         self.gpu_power_w  = gpu_power_w
         self.duration_s   = duration_min * 60
@@ -63,6 +63,20 @@ class RAPSLoader:
         path, _ = self._download_data()
         return path
 
+    @staticmethod
+    def _to_seconds(series):
+        """
+        Convert a pandas Series to float seconds.
+        Handles: Timedelta, datetime, int, float.
+        """
+        if pd.api.types.is_timedelta64_dtype(series):
+            return series.dt.total_seconds()
+        elif pd.api.types.is_datetime64_any_dtype(series):
+            min_t = series.min()
+            return (series - min_t).dt.total_seconds()
+        else:
+            return pd.to_numeric(series, errors="coerce").fillna(0)
+
     def load(self):
         """Load and return the raw job dataframe."""
         path = self._get_path()
@@ -82,17 +96,32 @@ class RAPSLoader:
             "time_span_h": None,
             "max_gpus":    None,
         }
-        if ("start_time" in df.columns
-                and "end_time" in df.columns):
-            span = (
-                df["end_time"].max()
-                - df["start_time"].min()
-            )
-            stats["time_span_h"] = round(float(span) / 3600, 1)
+
+        # Find start/end columns
+        start_col = next(
+            (c for c in ["start_time", "start", "submit_time"]
+             if c in df.columns), None
+        )
+        end_col = next(
+            (c for c in ["end_time", "end", "finish_time"]
+             if c in df.columns), None
+        )
+
+        if start_col and end_col:
+            try:
+                start_s = self._to_seconds(df[start_col])
+                end_s   = self._to_seconds(df[end_col])
+                span    = end_s.max() - start_s.min()
+                stats["time_span_h"] = round(float(span) / 3600, 1)
+            except Exception:
+                pass
 
         for col in ["num_gpus", "gpus", "nGPUs"]:
             if col in df.columns:
-                stats["max_gpus"] = int(df[col].max())
+                try:
+                    stats["max_gpus"] = int(df[col].max())
+                except Exception:
+                    pass
                 break
 
         return stats
@@ -103,70 +132,61 @@ class RAPSLoader:
         Returns same format as AILoadProfile.generate()
         so it is a drop-in replacement.
         """
-        df_jobs = self.load()
+        df_jobs = self.load().copy()
 
-        # ── Normalize timestamps to start from 0 ───────────────
-        start_col = None
-        for c in ["start_time", "start", "submit_time"]:
-            if c in df_jobs.columns:
-                start_col = c
-                break
+        # ── Find column names ──────────────────────────────────
+        start_col = next(
+            (c for c in ["start_time", "start", "submit_time"]
+             if c in df_jobs.columns), None
+        )
+        end_col = next(
+            (c for c in ["end_time", "end", "finish_time"]
+             if c in df_jobs.columns), None
+        )
+        gpu_col = next(
+            (c for c in ["num_gpus", "gpus", "nGPUs"]
+             if c in df_jobs.columns), None
+        )
 
-        end_col = None
-        for c in ["end_time", "end", "finish_time"]:
-            if c in df_jobs.columns:
-                end_col = c
-                break
-
+        # ── Convert times to float seconds ────────────────────
         if start_col:
-            df_jobs = df_jobs.copy()
-            df_jobs[start_col] = (
-                df_jobs[start_col] - df_jobs[start_col].min()
+            df_jobs["_start_s"] = self._to_seconds(
+                df_jobs[start_col]
             )
+            df_jobs["_start_s"] -= df_jobs["_start_s"].min()
+        else:
+            df_jobs["_start_s"] = 0.0
+
         if end_col:
-            df_jobs = df_jobs.copy()
-            df_jobs[end_col] = (
-                df_jobs[end_col] - df_jobs[end_col].min()
+            df_jobs["_end_s"] = self._to_seconds(
+                df_jobs[end_col]
             )
+            df_jobs["_end_s"] -= df_jobs["_end_s"].min()
+        else:
+            df_jobs["_end_s"] = self.duration_s
+
+        # ── Convert GPU count to float ─────────────────────────
+        if gpu_col:
+            df_jobs["_gpus"] = pd.to_numeric(
+                df_jobs[gpu_col], errors="coerce"
+            ).fillna(0)
+        else:
+            df_jobs["_gpus"] = 0.0
 
         # ── Build time array ───────────────────────────────────
         time_s = np.arange(0, self.duration_s, self.dt)
         power  = np.zeros(len(time_s))
 
-        # ── Get max GPU count for scaling ──────────────────────
-        gpu_col  = None
-        for c in ["num_gpus", "gpus", "nGPUs"]:
-            if c in df_jobs.columns:
-                gpu_col = c
-                break
-
-        max_gpus = float(df_jobs[gpu_col].max()) if gpu_col else 1.0
+        # ── Scale factor ───────────────────────────────────────
+        max_gpus = float(df_jobs["_gpus"].max()) if gpu_col else 1.0
         max_mw   = (max_gpus * self.gpu_power_w) / 1e6
         scale    = self.it_load_mw / max(max_mw, 0.001)
 
         # ── Fill power for each active job ─────────────────────
         for _, job in df_jobs.iterrows():
-            start = float(
-                self._get_col(
-                    job,
-                    ["start_time", "start", "submit_time"],
-                    0
-                )
-            )
-            end   = float(
-                self._get_col(
-                    job,
-                    ["end_time", "end", "finish_time"],
-                    0
-                )
-            )
-            gpus  = float(
-                self._get_col(
-                    job,
-                    ["num_gpus", "gpus", "nGPUs"],
-                    0
-                )
-            )
+            start = float(job["_start_s"])
+            end   = float(job["_end_s"])
+            gpus  = float(job["_gpus"])
 
             if end <= start or gpus <= 0:
                 continue
@@ -216,13 +236,3 @@ class RAPSLoader:
         })
 
         return df_out, drop_events
-
-    @staticmethod
-    def _get_col(row, candidates, default):
-        """Try multiple column name candidates."""
-        for col in candidates:
-            if col in row.index:
-                val = row[col]
-                if pd.notna(val):
-                    return val
-        return default
