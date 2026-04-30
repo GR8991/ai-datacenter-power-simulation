@@ -5,10 +5,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import sys
 import os
+import tempfile
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from models.ai_load_profile import AILoadProfile
+from models.raps_loader import RAPSLoader
 from models.gas_generator import GasGenerator
 from models.bess_model import BESSModel
 from simulation.engine import SimulationEngine
@@ -22,20 +24,30 @@ st.set_page_config(
 
 # ── Title ──────────────────────────────────────────────────────
 st.title("⚡ AI Data Center — Power Simulation Dashboard")
-st.markdown("**Based on NVIDIA BESS Self-Qualification Guidelines v0.4 (February 2026)**")
-
-st.info(
-    "📌 **Simulation Note:** This tool uses synthetic AI workload profiles "
-    "modelled on NVIDIA BESS Qualification parameters (Test 2, 4, 9, 11). "
-    "It is an engineering concept demonstrator — not connected to ExaDigiT RAPS "
-    "or EMT simulation tools. Results are for educational and planning purposes only."
+st.markdown(
+    "**Based on NVIDIA BESS Self-Qualification Guidelines v0.4 "
+    "(February 2026)**"
 )
-
+st.info(
+    "📌 **Simulation Note:** This tool supports both synthetic "
+    "AI workload profiles AND real ExaDigiT RAPS job trace data. "
+    "Based on NVIDIA BESS Qualification parameters "
+    "(Test 2, 4, 9, 11). Results are for educational "
+    "and planning purposes only."
+)
 st.divider()
 
 # ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Simulation Config")
+
+    # ── Data Source Toggle ─────────────────────────────────────
+    st.subheader("📂 Data Source")
+    data_source = st.radio(
+        "Select Workload Source",
+        ["🔢 Synthetic (Phase 1)", "📂 Real RAPS Data (Phase 2)"],
+        index=0
+    )
 
     st.subheader("🖥️ AI Data Center")
     it_load_mw     = st.slider("Total IT Load (MW)", 10, 500, 100)
@@ -48,7 +60,9 @@ with st.sidebar:
         "Ramp Rate (% IT Load/sec)", 5, 50, 20,
         help="NVIDIA PERF-CORE-01 requires <= 20% IT load/second"
     )
-    sim_duration   = st.slider("Simulation Duration (minutes)", 5, 120, 30)
+    sim_duration   = st.slider(
+        "Simulation Duration (minutes)", 5, 120, 30
+    )
 
     st.subheader("⛽ Gas Generator")
     gen_rated_mw   = st.slider("Generator Rated Power (MW)", 10, 600, 120)
@@ -87,7 +101,8 @@ with st.sidebar:
     st.markdown("[EPRI DCFlex](https://dcflex.epri.com/)")
 
 # ── Tabs ───────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📂 RAPS Data",
     "📊 AI Load Profile",
     "⛽ Generator Response",
     "🔋 BESS Behavior",
@@ -96,29 +111,123 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "ℹ️ About"
 ])
 
+# ── Tab 0: RAPS Data Upload ────────────────────────────────────
+with tab0:
+    st.subheader("📂 ExaDigiT RAPS Data Integration")
+    st.markdown("**Phase 2A — Real HPC Workload Data from Oak Ridge National Lab**")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### What is RAPS?")
+        st.markdown(
+            "RAPS (Resource Allocator and Power Simulator) is the "
+            "official ExaDigiT simulation tool from Oak Ridge National "
+            "Laboratory. It provides real supercomputer job traces "
+            "that generate realistic AI workload power profiles."
+        )
+        st.markdown("### How to Get the Data")
+        st.markdown("**Step 1:** Download the dataset:")
+        st.code(
+            "https://zenodo.org/records/10127767/files/"
+            "job_table.parquet",
+            language=None
+        )
+        st.markdown("**Step 2:** Upload the file below")
+        st.markdown("**Step 3:** Select **Real RAPS Data** in sidebar")
+        st.markdown("**Step 4:** Click **RUN SIMULATION**")
+
+    with col2:
+        st.markdown("### Dataset Info")
+        st.markdown("- **Source:** Marconi100 Supercomputer, CINECA Italy")
+        st.markdown("- **Jobs:** Real HPC job scheduling traces")
+        st.markdown("- **Format:** Parquet (columnar data)")
+        st.markdown("- **Size:** ~270 MB")
+        st.markdown("- **License:** Open access via Zenodo")
+        st.markdown("- **DOI:** 10.5281/zenodo.10127767")
+
+    st.divider()
+    st.markdown("### Upload RAPS Job Table")
+
+    uploaded_file = st.file_uploader(
+        "Upload job_table.parquet",
+        type=["parquet"],
+        help="Download from zenodo.org/records/10127767"
+    )
+
+    if uploaded_file is not None:
+        st.session_state["raps_file"] = uploaded_file
+
+        with st.spinner("Loading RAPS data..."):
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".parquet"
+                ) as tmp:
+                    tmp.write(uploaded_file.read())
+                    tmp_path = tmp.name
+
+                st.session_state["raps_path"] = tmp_path
+
+                loader  = RAPSLoader(
+                    tmp_path, it_load_mw,
+                    gpu_power_w=700,
+                    duration_min=sim_duration
+                )
+                stats   = loader.get_job_stats()
+                cols    = loader.get_columns()
+
+                st.success("✅ RAPS data loaded successfully!")
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total Jobs",    f"{stats['total_jobs']:,}")
+                c2.metric("Columns",       f"{len(stats['columns'])}")
+                c3.metric("Time Span",
+                          f"{stats['time_span_h']} hrs"
+                          if stats['time_span_h'] else "N/A")
+                c4.metric("Max GPUs",
+                          f"{stats['max_gpus']:,}"
+                          if stats['max_gpus'] else "N/A")
+
+                st.markdown("### Dataset Columns")
+                st.code(", ".join(cols), language=None)
+
+                st.markdown("### Preview (first 10 rows)")
+                df_preview = pd.read_parquet(tmp_path)
+                st.dataframe(
+                    df_preview.head(10),
+                    use_container_width=True
+                )
+
+            except Exception as e:
+                st.error(f"❌ Error loading RAPS data: {e}")
+    else:
+        st.warning(
+            "No file uploaded yet. Using synthetic data until "
+            "you upload job_table.parquet"
+        )
+        st.markdown("### Or use sample RAPS-like data")
+        if st.button("Generate Sample RAPS Profile"):
+            st.session_state["use_sample_raps"] = True
+            st.success(
+                "Sample RAPS profile will be used. "
+                "Select Real RAPS Data in sidebar and run simulation."
+            )
+
 # ── About Tab ──────────────────────────────────────────────────
 with tab6:
     st.subheader("ℹ️ About This Tool")
-
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("### What This Simulates")
         st.markdown(
             "This tool models the power dynamics of an AI Data Center "
-            "powered by a **Gas Generator + Battery Energy Storage System (BESS)**."
+            "powered by a **Gas Generator + BESS**."
         )
-        st.markdown("**It simulates:**")
-        st.markdown("- AI GPU workload power demand fluctuations")
-        st.markdown("- Sudden load drop events when AI jobs complete")
-        st.markdown("- Gas generator response — frequency deviation, overspeed risk")
-        st.markdown("- BESS behavior — charging surplus, discharging on spikes")
-        st.markdown("- Dummy load banks — last resort protection")
-        st.markdown("### Key Question Answered")
-        st.markdown(
-            "> When AI load suddenly drops, does the BESS protect "
-            "the gas generator — or do we need dummy load banks?"
-        )
+        st.markdown("**Phase 1:** Synthetic AI workload profiles")
+        st.markdown("**Phase 2A:** Real ExaDigiT RAPS job trace data")
+        st.markdown("**Phase 2B (coming):** More NVIDIA tests (7, 8, 10)")
+        st.markdown("**Phase 2C (coming):** Animated power flow diagram")
 
     with col2:
         st.markdown("### NVIDIA Tests Implemented")
@@ -151,7 +260,6 @@ with tab6:
     st.markdown("- ExaDigiT RAPS — Oak Ridge National Laboratory")
     st.markdown("- EPRI DCFlex Initiative")
     st.markdown("- IEEE 2800 / IEEE 1547-2018")
-    st.markdown("- Cummins Data Center Power Hub")
 
 # ── Run Simulation ─────────────────────────────────────────────
 if run_sim:
@@ -164,13 +272,30 @@ if run_sim:
             }
             gpu_power_w = gpu_map[gpu_power_kw]
 
-            load_model = AILoadProfile(
-                it_load_mw    = it_load_mw,
-                num_gpus      = num_gpus,
-                gpu_power_w   = gpu_power_w,
-                ramp_rate_pct = ramp_rate,
-                duration_min  = sim_duration
+            # ── Choose data source ─────────────────────────────
+            use_raps = (
+                "Real RAPS" in data_source
+                and "raps_path" in st.session_state
             )
+
+            if use_raps:
+                load_model = RAPSLoader(
+                    parquet_path = st.session_state["raps_path"],
+                    it_load_mw   = it_load_mw,
+                    gpu_power_w  = gpu_power_w,
+                    duration_min = sim_duration
+                )
+                data_label = "Real RAPS Data (ExaDigiT)"
+            else:
+                load_model = AILoadProfile(
+                    it_load_mw    = it_load_mw,
+                    num_gpus      = num_gpus,
+                    gpu_power_w   = gpu_power_w,
+                    ramp_rate_pct = ramp_rate,
+                    duration_min  = sim_duration
+                )
+                data_label = "Synthetic Data"
+
             gen_model = GasGenerator(
                 rated_mw        = gen_rated_mw,
                 droop_pct       = droop_pct,
@@ -192,7 +317,7 @@ if run_sim:
             df      = results["timeseries"]
             tests   = results["nvidia_tests"]
 
-            st.success("✅ Simulation complete!")
+            st.success(f"✅ Simulation complete! Data source: {data_label}")
 
         except Exception as e:
             st.error(f"❌ Simulation error: {e}")
@@ -201,6 +326,11 @@ if run_sim:
     # ── Tab 1: AI Load Profile ──────────────────────────────────
     with tab1:
         st.subheader("📊 AI Workload Power Demand Profile")
+        if use_raps:
+            st.success("📂 Using real ExaDigiT RAPS job trace data")
+        else:
+            st.info("🔢 Using synthetic workload data")
+
         st.caption("NVIDIA Test 4: Ramp rate must be <= 20% IT load/second")
 
         c1, c2, c3, c4 = st.columns(4)
@@ -228,7 +358,7 @@ if run_sim:
                 line_width=0
             )
         fig1.update_layout(
-            title="AI Workload Power Profile — Sudden Drop Events Highlighted",
+            title=f"AI Workload Power Profile — {data_label}",
             xaxis_title="Time (seconds)",
             yaxis_title="Power (MW)",
             template="plotly_dark",
@@ -245,16 +375,19 @@ if run_sim:
             ]
             st.dataframe(drop_df, use_container_width=True)
             st.download_button(
-                label="⬇️ Download Drop Events CSV",
-                data=drop_df.to_csv(index=False),
-                file_name="load_drop_events.csv",
-                mime="text/csv"
+                "⬇️ Download Drop Events CSV",
+                drop_df.to_csv(index=False),
+                "load_drop_events.csv",
+                "text/csv"
             )
 
     # ── Tab 2: Generator Response ───────────────────────────────
     with tab2:
         st.subheader("⛽ Gas Generator Response to Load Changes")
-        st.caption("NVIDIA Test 9: Frequency must stay within limits during load transients")
+        st.caption(
+            "NVIDIA Test 9: Frequency must stay within "
+            "limits during load transients"
+        )
 
         c1, c2, c3 = st.columns(3)
         c1.metric(
@@ -280,28 +413,24 @@ if run_sim:
             )
         )
         fig2.add_trace(go.Scatter(
-            x=df["time_s"],
-            y=df["gen_output_mw"],
+            x=df["time_s"], y=df["gen_output_mw"],
             name="Generator Output",
             line=dict(color="#FFB300", width=2)
         ), row=1, col=1)
         fig2.add_hline(
             y=gen_rated_mw * min_load_pct / 100,
-            line_dash="dash",
-            line_color="red",
+            line_dash="dash", line_color="red",
             annotation_text="Min Load — wet stacking risk",
             row=1, col=1
         )
         fig2.add_hline(
             y=gen_rated_mw,
-            line_dash="dash",
-            line_color="orange",
+            line_dash="dash", line_color="orange",
             annotation_text="Rated Capacity",
             row=1, col=1
         )
         fig2.add_trace(go.Scatter(
-            x=df["time_s"],
-            y=df["freq_deviation_hz"],
+            x=df["time_s"], y=df["freq_deviation_hz"],
             name="Frequency Deviation",
             line=dict(color="#FF5733", width=2)
         ), row=2, col=1)
@@ -335,7 +464,10 @@ if run_sim:
     # ── Tab 3: BESS Behavior ────────────────────────────────────
     with tab3:
         st.subheader("🔋 BESS State of Charge & Power Flow")
-        st.caption("NVIDIA Test 11: SOC drift must stay <= 5% over simulation period")
+        st.caption(
+            "NVIDIA Test 11: SOC drift must stay "
+            "<= 5% over simulation period"
+        )
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Final SOC",       f"{df['soc_pct'].iloc[-1]:.1f}%")
@@ -352,8 +484,7 @@ if run_sim:
             )
         )
         fig3.add_trace(go.Scatter(
-            x=df["time_s"],
-            y=df["soc_pct"],
+            x=df["time_s"], y=df["soc_pct"],
             name="SOC (%)",
             line=dict(color="#00FF88", width=2),
             fill="tozeroy",
@@ -368,8 +499,7 @@ if run_sim:
             annotation_text=f"SOC Min {soc_min}%", row=1, col=1
         )
         fig3.add_trace(go.Scatter(
-            x=df["time_s"],
-            y=df["bess_power_mw"],
+            x=df["time_s"], y=df["bess_power_mw"],
             name="BESS Power (MW)",
             line=dict(color="#BB86FC", width=2)
         ), row=2, col=1)
@@ -391,7 +521,10 @@ if run_sim:
     # ── Tab 4: BESS vs Dummy Load ───────────────────────────────
     with tab4:
         st.subheader("⚖️ BESS Charging vs Dummy Load Bank")
-        st.caption("How much surplus power was stored in BESS vs wasted as heat in dummy loads")
+        st.caption(
+            "How much surplus power was stored in BESS "
+            "vs wasted as heat in dummy loads"
+        )
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Stored in BESS",
@@ -405,7 +538,6 @@ if run_sim:
                   delta="Fuel Saved")
 
         col1, col2 = st.columns(2)
-
         with col1:
             fig_pie = go.Figure(go.Pie(
                 labels=[
@@ -454,16 +586,14 @@ if run_sim:
 
         fig4 = go.Figure()
         fig4.add_trace(go.Scatter(
-            x=df["time_s"],
-            y=df["bess_charging_mw"],
+            x=df["time_s"], y=df["bess_charging_mw"],
             name="BESS Charging (MW)",
             stackgroup="one",
             line=dict(color="#00FF88"),
             fillcolor="rgba(0,255,136,0.4)"
         ))
         fig4.add_trace(go.Scatter(
-            x=df["time_s"],
-            y=df["dummy_load_active_mw"],
+            x=df["time_s"], y=df["dummy_load_active_mw"],
             name="Dummy Load Active (MW)",
             stackgroup="one",
             line=dict(color="#FF5733"),
@@ -489,7 +619,10 @@ if run_sim:
     # ── Tab 5: NVIDIA Test Results ──────────────────────────────
     with tab5:
         st.subheader("✅ NVIDIA BESS Qualification Test Results")
-        st.caption("Based on NVIDIA BESS Self-Qualification Guidelines v0.4 — February 2026")
+        st.caption(
+            "Based on NVIDIA BESS Self-Qualification "
+            "Guidelines v0.4 — February 2026"
+        )
 
         pass_count = sum(
             1 for t in tests.values() if t["status"] == "PASS"
@@ -502,16 +635,13 @@ if run_sim:
             "Overall Status",
             "QUALIFIED" if pass_count == total else "NOT QUALIFIED"
         )
-        c3.metric(
-            "Compliance Score",
-            f"{pass_count / total * 100:.0f}%"
-        )
+        c3.metric("Compliance Score", f"{pass_count / total * 100:.0f}%")
 
         st.divider()
 
         for test_name, test_result in tests.items():
-            status  = test_result["status"]
-            icon    = "✅" if status == "PASS" else "❌"
+            status = test_result["status"]
+            icon   = "✅" if status == "PASS" else "❌"
 
             with st.expander(
                 f"{icon} {test_name} — {status}",
@@ -552,19 +682,23 @@ if run_sim:
 
 else:
     with tab1:
-        st.info("👈 Configure parameters in the sidebar and click RUN SIMULATION")
+        st.info(
+            "👈 Configure parameters in the sidebar "
+            "and click RUN SIMULATION"
+        )
         st.markdown("### How to Use")
-        st.markdown("1. Set your **AI Data Center** parameters (IT load, GPU count)")
-        st.markdown("2. Configure your **Gas Generator** (rated power, droop, governor speed)")
-        st.markdown("3. Set **BESS** parameters (capacity, power, SOC limits, GFM vs GFL)")
-        st.markdown("4. Set **Dummy Load Bank** capacity")
-        st.markdown("5. Click **RUN SIMULATION**")
-        st.markdown("6. Explore all tabs and download CSV results")
+        st.markdown("1. Choose **Data Source** in sidebar (Synthetic or RAPS)")
+        st.markdown("2. Set **AI Data Center** parameters")
+        st.markdown("3. Configure **Gas Generator** settings")
+        st.markdown("4. Set **BESS** parameters")
+        st.markdown("5. Set **Dummy Load Bank** capacity")
+        st.markdown("6. Click **RUN SIMULATION**")
+        st.markdown("7. Explore all tabs and download CSV results")
     with tab2:
         st.info("👈 Run simulation to see generator frequency response")
     with tab3:
         st.info("👈 Run simulation to see BESS SOC and power flow")
     with tab4:
-        st.info("👈 Run simulation to see BESS vs Dummy Load energy comparison")
+        st.info("👈 Run simulation to see BESS vs Dummy Load comparison")
     with tab5:
         st.info("👈 Run simulation to see NVIDIA qualification test results")
