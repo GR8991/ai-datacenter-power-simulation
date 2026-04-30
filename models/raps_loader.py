@@ -2,11 +2,14 @@ import pandas as pd
 import numpy as np
 import os
 import tempfile
-import streamlit as st
+
 
 ZENODO_URL = (
     "https://zenodo.org/records/10127767/files/job_table.parquet"
 )
+
+# Module-level cache — persists across Streamlit reruns
+_cache = {}
 
 
 class RAPSLoader:
@@ -27,13 +30,16 @@ class RAPSLoader:
         self.parquet_path = parquet_path
 
     @staticmethod
-    @st.cache_data(show_spinner="📥 Downloading RAPS data from Zenodo...")
     def _download_data():
         """
         Download job_table.parquet from Zenodo.
-        Cached so it only downloads once per session.
+        Uses module-level dict as cache.
         """
         import requests
+
+        if "parquet_path" in _cache:
+            return _cache["parquet_path"], _cache["file_size"]
+
         try:
             response = requests.get(
                 ZENODO_URL, stream=True, timeout=180
@@ -49,16 +55,27 @@ class RAPSLoader:
                 if chunk:
                     tmp.write(chunk)
             tmp.close()
-            return tmp.name, os.path.getsize(tmp.name)
+
+            file_size = os.path.getsize(tmp.name)
+            _cache["parquet_path"] = tmp.name
+            _cache["file_size"]    = file_size
+
+            return tmp.name, file_size
 
         except Exception as e:
             raise RuntimeError(
                 f"Failed to download RAPS data from Zenodo: {e}"
             )
 
+    @staticmethod
+    def clear_cache():
+        """Clear the module-level cache."""
+        _cache.clear()
+
     def _get_path(self):
         """Return path to parquet — use provided or download."""
-        if self.parquet_path and os.path.exists(self.parquet_path):
+        if (self.parquet_path
+                and os.path.exists(self.parquet_path)):
             return self.parquet_path
         path, _ = self._download_data()
         return path
@@ -75,7 +92,9 @@ class RAPSLoader:
             min_t = series.min()
             return (series - min_t).dt.total_seconds()
         else:
-            return pd.to_numeric(series, errors="coerce").fillna(0)
+            return pd.to_numeric(
+                series, errors="coerce"
+            ).fillna(0)
 
     def load(self):
         """Load and return the raw job dataframe."""
@@ -97,7 +116,6 @@ class RAPSLoader:
             "max_gpus":    None,
         }
 
-        # Find start/end columns
         start_col = next(
             (c for c in ["start_time", "start", "submit_time"]
              if c in df.columns), None
@@ -112,7 +130,9 @@ class RAPSLoader:
                 start_s = self._to_seconds(df[start_col])
                 end_s   = self._to_seconds(df[end_col])
                 span    = end_s.max() - start_s.min()
-                stats["time_span_h"] = round(float(span) / 3600, 1)
+                stats["time_span_h"] = round(
+                    float(span) / 3600, 1
+                )
             except Exception:
                 pass
 
@@ -130,7 +150,6 @@ class RAPSLoader:
         """
         Process RAPS job table into a power time series.
         Returns same format as AILoadProfile.generate()
-        so it is a drop-in replacement.
         """
         df_jobs = self.load().copy()
 
@@ -163,7 +182,7 @@ class RAPSLoader:
             )
             df_jobs["_end_s"] -= df_jobs["_end_s"].min()
         else:
-            df_jobs["_end_s"] = self.duration_s
+            df_jobs["_end_s"] = float(self.duration_s)
 
         # ── Convert GPU count to float ─────────────────────────
         if gpu_col:
@@ -178,7 +197,8 @@ class RAPSLoader:
         power  = np.zeros(len(time_s))
 
         # ── Scale factor ───────────────────────────────────────
-        max_gpus = float(df_jobs["_gpus"].max()) if gpu_col else 1.0
+        max_gpus = float(df_jobs["_gpus"].max()) \
+            if gpu_col else 1.0
         max_mw   = (max_gpus * self.gpu_power_w) / 1e6
         scale    = self.it_load_mw / max(max_mw, 0.001)
 
