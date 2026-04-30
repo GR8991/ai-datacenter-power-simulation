@@ -83,7 +83,9 @@ with st.sidebar:
     )
 
     st.subheader("🧱 Dummy Load Bank")
-    dummy_load_mw  = st.slider("Dummy Load Bank Capacity (MW)", 0, 100, 30)
+    dummy_load_mw  = st.slider(
+        "Dummy Load Bank Capacity (MW)", 0, 100, 30
+    )
 
     st.divider()
     run_sim = st.button(
@@ -133,14 +135,14 @@ with tab0:
         st.markdown("**Step 1:** Select **Real RAPS Data** in sidebar")
         st.markdown("**Step 2:** Click **Load RAPS Data** button below")
         st.markdown(
-            "**Step 3:** Data downloads automatically from Zenodo URL"
+            "**Step 3:** Data downloads automatically from Zenodo"
         )
-        st.markdown("**Step 4:** Data is cached — no re-download needed")
+        st.markdown("**Step 4:** Data cached — no re-download needed")
         st.markdown("**Step 5:** Click **RUN SIMULATION**")
         st.success(
             "📥 Data fetched directly from Zenodo. "
-            "No file upload required! Automatically cached "
-            "after first download."
+            "No file upload required! "
+            "Automatically cached after first download."
         )
 
     with col2:
@@ -163,7 +165,7 @@ with tab0:
         st.markdown(
             "Real HPC job traces capture actual workload patterns — "
             "unpredictable start/stop times, varied GPU counts, "
-            "and realistic power ramps — that synthetic data "
+            "and realistic power ramps that synthetic data "
             "cannot replicate."
         )
 
@@ -189,13 +191,15 @@ with tab0:
         else:
             st.warning("⏳ Not loaded yet")
 
+    # ── Clear cache ────────────────────────────────────────────
     if clear_btn:
         for key in ["raps_loaded", "raps_stats", "raps_cols"]:
             if key in st.session_state:
                 del st.session_state[key]
-        RAPSLoader._download_data.clear()
+        RAPSLoader.clear_cache()
         st.success("🗑️ Cache cleared! Click Load to re-download.")
 
+    # ── Load RAPS data ─────────────────────────────────────────
     if load_raps_btn:
         try:
             with st.spinner(
@@ -245,13 +249,12 @@ with tab0:
                 use_container_width=True
             )
 
-            st.markdown("### Power Distribution by GPU Count")
-            if any(c in df_prev.columns
-                   for c in ["num_gpus", "gpus", "nGPUs"]):
-                gpu_col = next(
-                    c for c in ["num_gpus", "gpus", "nGPUs"]
-                    if c in df_prev.columns
-                )
+            st.markdown("### GPU Count Distribution")
+            gpu_col = next(
+                (c for c in ["num_gpus", "gpus", "nGPUs"]
+                 if c in df_prev.columns), None
+            )
+            if gpu_col:
                 fig_hist = go.Figure(go.Histogram(
                     x=df_prev[gpu_col],
                     nbinsx=50,
@@ -265,29 +268,48 @@ with tab0:
                     template="plotly_dark",
                     height=350
                 )
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(
+                    fig_hist, use_container_width=True
+                )
 
             st.markdown("### Job Duration Distribution")
-            if ("start_time" in df_prev.columns
-                    and "end_time" in df_prev.columns):
-                df_prev["duration_h"] = (
-                    (df_prev["end_time"] - df_prev["start_time"])
-                    / 3600
-                )
-                fig_dur = go.Figure(go.Histogram(
-                    x=df_prev["duration_h"].clip(0, 48),
-                    nbinsx=50,
-                    marker_color="#FFB300",
-                    opacity=0.8
-                ))
-                fig_dur.update_layout(
-                    title="Job Duration Distribution (hours)",
-                    xaxis_title="Duration (hours)",
-                    yaxis_title="Job Count",
-                    template="plotly_dark",
-                    height=350
-                )
-                st.plotly_chart(fig_dur, use_container_width=True)
+            start_col = next(
+                (c for c in
+                 ["start_time", "start", "submit_time"]
+                 if c in df_prev.columns), None
+            )
+            end_col = next(
+                (c for c in
+                 ["end_time", "end", "finish_time"]
+                 if c in df_prev.columns), None
+            )
+            if start_col and end_col:
+                try:
+                    start_s = RAPSLoader._to_seconds(
+                        df_prev[start_col]
+                    )
+                    end_s   = RAPSLoader._to_seconds(
+                        df_prev[end_col]
+                    )
+                    duration_h = (end_s - start_s) / 3600
+                    fig_dur = go.Figure(go.Histogram(
+                        x=duration_h.clip(0, 48),
+                        nbinsx=50,
+                        marker_color="#FFB300",
+                        opacity=0.8
+                    ))
+                    fig_dur.update_layout(
+                        title="Job Duration Distribution (hours)",
+                        xaxis_title="Duration (hours)",
+                        yaxis_title="Job Count",
+                        template="plotly_dark",
+                        height=350
+                    )
+                    st.plotly_chart(
+                        fig_dur, use_container_width=True
+                    )
+                except Exception:
+                    pass
 
         except Exception as e:
             st.error(f"❌ Error loading RAPS data: {e}")
@@ -325,8 +347,8 @@ with tab0:
     else:
         st.info(
             "👆 Click **Load RAPS Data from Zenodo** to fetch "
-            "real HPC job traces. Until then, simulation uses "
-            "synthetic data."
+            "real HPC job traces. Until then, simulation "
+            "uses synthetic data."
         )
         st.markdown("### Synthetic vs Real Data Comparison")
         compare_data = {
@@ -349,7 +371,7 @@ with tab0:
             "📂 Real RAPS (Phase 2)": [
                 "Zenodo / Oak Ridge NL",
                 "Real HPC scheduling",
-                "Variable — job-dependent",
+                "Variable job-dependent",
                 "Unpredictable",
                 "High",
                 "~1-2 min download"
@@ -365,14 +387,17 @@ with tab6:
     with col1:
         st.markdown("### What This Simulates")
         st.markdown(
-            "This tool models the power dynamics of an AI Data Center "
-            "powered by a **Gas Generator + BESS**."
+            "This tool models the power dynamics of an AI Data "
+            "Center powered by a **Gas Generator + BESS**."
         )
         st.markdown("**Phase 1:** Synthetic AI workload profiles")
         st.markdown("**Phase 2A:** Real ExaDigiT RAPS job trace data")
-        st.markdown("**Phase 2B (coming):** More NVIDIA tests (7, 8, 10)")
-        st.markdown("**Phase 2C (coming):** Animated power flow diagram")
-
+        st.markdown(
+            "**Phase 2B (coming):** More NVIDIA tests (7, 8, 10)"
+        )
+        st.markdown(
+            "**Phase 2C (coming):** Animated power flow diagram"
+        )
         st.markdown("### Key Question Answered")
         st.markdown(
             "> When AI load suddenly drops, does the BESS "
@@ -390,7 +415,9 @@ with tab6:
                 "Generator Following (droop response)",
                 "SOC Drift (24h energy management)"
             ],
-            "Status": ["✅ Live", "✅ Live", "✅ Live", "✅ Live"]
+            "Status": [
+                "✅ Live", "✅ Live", "✅ Live", "✅ Live"
+            ]
         }
         st.table(pd.DataFrame(test_data))
 
@@ -436,13 +463,15 @@ with tab6:
     st.markdown("- ExaDigiT RAPS — Oak Ridge National Laboratory")
     st.markdown("- EPRI DCFlex Initiative")
     st.markdown("- IEEE 2800 / IEEE 1547-2018")
-    st.markdown("- Zenodo Dataset DOI: 10.5281/zenodo.10127767")
+    st.markdown(
+        "- Zenodo Dataset DOI: 10.5281/zenodo.10127767"
+    )
 
 # ── Run Simulation ─────────────────────────────────────────────
 if run_sim:
     with st.spinner("⚙️ Running simulation..."):
         try:
-            gpu_map     = {
+            gpu_map = {
                 "H100 (700W)":  700,
                 "A100 (400W)":  400,
                 "H200 (1000W)": 1000
@@ -460,7 +489,7 @@ if run_sim:
                     gpu_power_w  = gpu_power_w,
                     duration_min = sim_duration
                 )
-                data_label = "📂 Real RAPS Data (ExaDigiT / Zenodo)"
+                data_label = "📂 Real RAPS Data (ExaDigiT)"
             else:
                 load_model = AILoadProfile(
                     it_load_mw    = it_load_mw,
@@ -487,7 +516,9 @@ if run_sim:
                 dummy_load_mw   = dummy_load_mw
             )
 
-            engine  = SimulationEngine(load_model, gen_model, bess_obj)
+            engine  = SimulationEngine(
+                load_model, gen_model, bess_obj
+            )
             results = engine.run()
             df      = results["timeseries"]
             tests   = results["nvidia_tests"]
@@ -510,7 +541,8 @@ if run_sim:
             st.info("🔢 Using synthetic workload data")
 
         st.caption(
-            "NVIDIA Test 4: Ramp rate must be <= 20% IT load/second"
+            "NVIDIA Test 4: Ramp rate must be "
+            "<= 20% IT load/second"
         )
 
         c1, c2, c3, c4 = st.columns(4)
@@ -895,16 +927,24 @@ else:
         st.markdown("4. Set **BESS** parameters")
         st.markdown("5. Set **Dummy Load Bank** capacity")
         st.markdown("6. Click **RUN SIMULATION**")
-        st.markdown("7. Explore all tabs and download CSV results")
+        st.markdown(
+            "7. Explore all tabs and download CSV results"
+        )
     with tab2:
-        st.info("👈 Run simulation to see generator frequency response")
+        st.info(
+            "👈 Run simulation to see generator frequency response"
+        )
     with tab3:
-        st.info("👈 Run simulation to see BESS SOC and power flow")
+        st.info(
+            "👈 Run simulation to see BESS SOC and power flow"
+        )
     with tab4:
         st.info(
-            "👈 Run simulation to see BESS vs Dummy Load comparison"
+            "👈 Run simulation to see "
+            "BESS vs Dummy Load comparison"
         )
     with tab5:
         st.info(
-            "👈 Run simulation to see NVIDIA qualification test results"
+            "👈 Run simulation to see "
+            "NVIDIA qualification test results"
         )
