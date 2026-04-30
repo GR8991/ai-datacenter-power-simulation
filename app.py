@@ -13,37 +13,51 @@ from models.gas_generator import GasGenerator
 from models.bess_model import BESSModel
 from simulation.engine import SimulationEngine
 
-# ─── Page Config ───────────────────────────────────────────
+# ── Page Config ────────────────────────────────────────────────
 st.set_page_config(
     page_title="AI Data Center Power Simulation",
     page_icon="⚡",
     layout="wide"
 )
 
-# ─── Title ─────────────────────────────────────────────────
+# ── Title ──────────────────────────────────────────────────────
 st.title("⚡ AI Data Center — Power Simulation Dashboard")
-st.markdown("**Based on NVIDIA BESS Self-Qualification Guidelines v0.4**")
+st.markdown("**Based on NVIDIA BESS Self-Qualification Guidelines v0.4 (February 2026)**")
+
+st.info(
+    "📌 **Simulation Note:** This tool uses synthetic AI workload profiles "
+    "modelled on NVIDIA BESS Qualification parameters (Test 2, 4, 9, 11). "
+    "It is an engineering concept demonstrator — not connected to ExaDigiT RAPS "
+    "or EMT simulation tools. Results are for educational and planning purposes only."
+)
+
 st.divider()
 
-# ─── Sidebar ───────────────────────────────────────────────
+# ── Sidebar ────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Simulation Config")
 
     st.subheader("🖥️ AI Data Center")
     it_load_mw     = st.slider("Total IT Load (MW)", 10, 500, 100)
     num_gpus       = st.slider("Number of GPUs", 1000, 50000, 8192)
-    gpu_power_kw   = st.selectbox("GPU Type (Max Power)", 
-                                   ["H100 (700W)", "A100 (400W)", "H200 (1000W)"])
-    ramp_rate      = st.slider("Ramp Rate (% IT Load/sec)", 5, 50, 20,
-                                help="NVIDIA requires 20% IT load/second")
+    gpu_power_kw   = st.selectbox(
+        "GPU Type (Max Power)",
+        ["H100 (700W)", "A100 (400W)", "H200 (1000W)"]
+    )
+    ramp_rate      = st.slider(
+        "Ramp Rate (% IT Load/sec)", 5, 50, 20,
+        help="NVIDIA PERF-CORE-01 requires <= 20% IT load/second"
+    )
     sim_duration   = st.slider("Simulation Duration (minutes)", 5, 120, 30)
 
     st.subheader("⛽ Gas Generator")
     gen_rated_mw   = st.slider("Generator Rated Power (MW)", 10, 600, 120)
     droop_pct      = st.slider("Droop Setting (%)", 1, 10, 5)
     governor_speed = st.slider("Governor Response Time (sec)", 1, 10, 3)
-    min_load_pct   = st.slider("Minimum Load (%)", 10, 40, 25,
-                                help="Below this, wet stacking risk")
+    min_load_pct   = st.slider(
+        "Minimum Load (%)", 10, 40, 25,
+        help="Below this threshold, wet stacking risk increases"
+    )
 
     st.subheader("🔋 BESS")
     bess_capacity  = st.slider("BESS Capacity (MWh)", 1, 100, 20)
@@ -51,281 +65,506 @@ with st.sidebar:
     soc_initial    = st.slider("Initial SOC (%)", 20, 100, 80)
     soc_min        = st.slider("Min SOC (%)", 5, 30, 20)
     soc_max        = st.slider("Max SOC (%)", 70, 100, 90)
-    bess_mode      = st.selectbox("BESS Mode", 
-                                   ["Grid-Forming (GFM)", "Grid-Following (GFL)"])
+    bess_mode      = st.selectbox(
+        "BESS Mode",
+        ["Grid-Forming (GFM)", "Grid-Following (GFL)"]
+    )
 
     st.subheader("🧱 Dummy Load Bank")
     dummy_load_mw  = st.slider("Dummy Load Bank Capacity (MW)", 0, 100, 30)
 
     st.divider()
-    run_sim = st.button("▶️ RUN SIMULATION", type="primary", use_container_width=True)
+    run_sim = st.button(
+        "▶️ RUN SIMULATION",
+        type="primary",
+        use_container_width=True
+    )
 
-# ─── Tabs ──────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    st.divider()
+    st.markdown("**📖 References**")
+    st.markdown("[NVIDIA BESS Guidelines v0.4](https://docs.nvidia.com/datacenter/dsx/BESS-Self-Qualification-Guidelines.html)")
+    st.markdown("[ExaDigiT RAPS](https://code.ornl.gov/exadigit/raps)")
+    st.markdown("[EPRI DCFlex](https://dcflex.epri.com/)")
+
+# ── Tabs ───────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 AI Load Profile",
     "⛽ Generator Response",
     "🔋 BESS Behavior",
     "⚖️ BESS vs Dummy Load",
-    "✅ NVIDIA Test Results"
+    "✅ NVIDIA Test Results",
+    "ℹ️ About"
 ])
 
+# ── About Tab ──────────────────────────────────────────────────
+with tab6:
+    st.subheader("ℹ️ About This Tool")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### What This Simulates")
+        st.markdown(
+            "This tool models the power dynamics of an AI Data Center "
+            "powered by a **Gas Generator + Battery Energy Storage System (BESS)**."
+        )
+        st.markdown("**It simulates:**")
+        st.markdown("- AI GPU workload power demand fluctuations")
+        st.markdown("- Sudden load drop events when AI jobs complete")
+        st.markdown("- Gas generator response — frequency deviation, overspeed risk")
+        st.markdown("- BESS behavior — charging surplus, discharging on spikes")
+        st.markdown("- Dummy load banks — last resort protection")
+        st.markdown("### Key Question Answered")
+        st.markdown(
+            "> When AI load suddenly drops, does the BESS protect "
+            "the gas generator — or do we need dummy load banks?"
+        )
+
+    with col2:
+        st.markdown("### NVIDIA Tests Implemented")
+        test_data = {
+            "Test": ["Test 2", "Test 4", "Test 9", "Test 11"],
+            "Description": [
+                "GFM Voltage & Frequency Regulation",
+                "AI Buffering Proxy (20% IT load/sec)",
+                "Generator Following (droop response)",
+                "SOC Drift (24h energy management)"
+            ]
+        }
+        st.table(pd.DataFrame(test_data))
+
+        st.markdown("### System Architecture")
+        st.code(
+            "Gas Generator (droop master)\n"
+            "        ↕\n"
+            "Grid-Forming BESS (fast buffer)\n"
+            "        ↕\n"
+            "AI GPU Load Racks\n"
+            "        ↕\n"
+            "Dummy Load Banks (backup)",
+            language=None
+        )
+
+    st.divider()
+    st.markdown("### References")
+    st.markdown("- NVIDIA BESS Self-Qualification Guidelines v0.4 (February 2026)")
+    st.markdown("- ExaDigiT RAPS — Oak Ridge National Laboratory")
+    st.markdown("- EPRI DCFlex Initiative")
+    st.markdown("- IEEE 2800 / IEEE 1547-2018")
+    st.markdown("- Cummins Data Center Power Hub")
+
+# ── Run Simulation ─────────────────────────────────────────────
 if run_sim:
-    with st.spinner("Running simulation..."):
+    with st.spinner("⚙️ Running simulation..."):
+        try:
+            gpu_map     = {
+                "H100 (700W)":  700,
+                "A100 (400W)":  400,
+                "H200 (1000W)": 1000
+            }
+            gpu_power_w = gpu_map[gpu_power_kw]
 
-        # Parse GPU power
-        gpu_map = {"H100 (700W)": 700, "A100 (400W)": 400, "H200 (1000W)": 1000}
-        gpu_power_w = gpu_map[gpu_power_kw]
+            load_model = AILoadProfile(
+                it_load_mw    = it_load_mw,
+                num_gpus      = num_gpus,
+                gpu_power_w   = gpu_power_w,
+                ramp_rate_pct = ramp_rate,
+                duration_min  = sim_duration
+            )
+            gen_model = GasGenerator(
+                rated_mw        = gen_rated_mw,
+                droop_pct       = droop_pct,
+                governor_time_s = governor_speed,
+                min_load_pct    = min_load_pct
+            )
+            bess_obj = BESSModel(
+                capacity_mwh    = bess_capacity,
+                max_power_mw    = bess_power,
+                soc_initial_pct = soc_initial,
+                soc_min_pct     = soc_min,
+                soc_max_pct     = soc_max,
+                mode            = bess_mode,
+                dummy_load_mw   = dummy_load_mw
+            )
 
-        # Initialize models
-        load_model = AILoadProfile(
-            it_load_mw=it_load_mw,
-            num_gpus=num_gpus,
-            gpu_power_w=gpu_power_w,
-            ramp_rate_pct=ramp_rate,
-            duration_min=sim_duration
-        )
+            engine  = SimulationEngine(load_model, gen_model, bess_obj)
+            results = engine.run()
+            df      = results["timeseries"]
+            tests   = results["nvidia_tests"]
 
-        gen_model = GasGenerator(
-            rated_mw=gen_rated_mw,
-            droop_pct=droop_pct,
-            governor_time_s=governor_speed,
-            min_load_pct=min_load_pct
-        )
+            st.success("✅ Simulation complete!")
 
-        bess_model = BESSModel(
-            capacity_mwh=bess_capacity,
-            max_power_mw=bess_power,
-            soc_initial_pct=soc_initial,
-            soc_min_pct=soc_min,
-            soc_max_pct=soc_max,
-            mode=bess_mode,
-            dummy_load_mw=dummy_load_mw
-        )
+        except Exception as e:
+            st.error(f"❌ Simulation error: {e}")
+            st.stop()
 
-        # Run simulation engine
-        engine = SimulationEngine(load_model, gen_model, bess_model)
-        results = engine.run()
-
-        df = results["timeseries"]
-        tests = results["nvidia_tests"]
-
-    # ── Tab 1: AI Load Profile ──────────────────────────────
+    # ── Tab 1: AI Load Profile ──────────────────────────────────
     with tab1:
         st.subheader("📊 AI Workload Power Demand Profile")
-        st.caption("Simulates GPU workload ramps based on NVIDIA Test 4 — 20% IT load/second")
+        st.caption("NVIDIA Test 4: Ramp rate must be <= 20% IT load/second")
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Peak Load", f"{df['it_load_mw'].max():.1f} MW")
-        col2.metric("Min Load",  f"{df['it_load_mw'].min():.1f} MW")
-        col3.metric("Avg Load",  f"{df['it_load_mw'].mean():.1f} MW")
-        col4.metric("Load Drop Events", 
-                    f"{int(results['num_drop_events'])}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Peak Load",        f"{df['it_load_mw'].max():.1f} MW")
+        c2.metric("Min Load",         f"{df['it_load_mw'].min():.1f} MW")
+        c3.metric("Avg Load",         f"{df['it_load_mw'].mean():.1f} MW")
+        c4.metric("Load Drop Events", f"{int(results['num_drop_events'])}")
 
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(
-            x=df["time_s"], y=df["it_load_mw"],
-            name="IT Load (MW)", line=dict(color="#00D4FF", width=2),
-            fill="tozeroy", fillcolor="rgba(0,212,255,0.1)"
+            x=df["time_s"],
+            y=df["it_load_mw"],
+            name="IT Load (MW)",
+            line=dict(color="#00D4FF", width=2),
+            fill="tozeroy",
+            fillcolor="rgba(0,212,255,0.1)"
         ))
-
-        # Highlight sudden drop events
         for event in results["drop_events"]:
             fig1.add_vrect(
-                x0=event["start"], x1=event["end"],
+                x0=event["start"],
+                x1=event["end"],
                 fillcolor="rgba(255,50,50,0.2)",
-                annotation_text="⚠️ Load Drop",
+                annotation_text="Load Drop",
                 annotation_position="top left",
                 line_width=0
             )
-
         fig1.update_layout(
-            title="AI Workload Power Profile",
+            title="AI Workload Power Profile — Sudden Drop Events Highlighted",
             xaxis_title="Time (seconds)",
             yaxis_title="Power (MW)",
             template="plotly_dark",
-            height=400
+            height=420
         )
         st.plotly_chart(fig1, use_container_width=True)
 
-        st.subheader("📋 Load Event Table")
-        st.dataframe(pd.DataFrame(results["drop_events"]), use_container_width=True)
+        if results["drop_events"]:
+            st.subheader("📋 Load Drop Event Details")
+            drop_df = pd.DataFrame(results["drop_events"])
+            drop_df.columns = [
+                "Start (s)", "End (s)",
+                "Drop (MW)", "Drop (%)", "Ramp (MW/s)"
+            ]
+            st.dataframe(drop_df, use_container_width=True)
+            st.download_button(
+                label="⬇️ Download Drop Events CSV",
+                data=drop_df.to_csv(index=False),
+                file_name="load_drop_events.csv",
+                mime="text/csv"
+            )
 
-    # ── Tab 2: Generator Response ───────────────────────────
+    # ── Tab 2: Generator Response ───────────────────────────────
     with tab2:
         st.subheader("⛽ Gas Generator Response to Load Changes")
+        st.caption("NVIDIA Test 9: Frequency must stay within limits during load transients")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Max Frequency Deviation",
-                    f"{df['freq_deviation_hz'].abs().max():.3f} Hz",
-                    delta="Normal < 0.5 Hz")
-        col2.metric("Overspeed Events",
-                    f"{int(results['overspeed_events'])}")
-        col3.metric("Generator Utilization",
-                    f"{df['gen_output_mw'].mean() / gen_rated_mw * 100:.1f}%")
-
-        fig2 = make_subplots(rows=2, cols=1,
-                             subplot_titles=("Generator Output (MW)",
-                                             "Frequency Deviation (Hz)"))
-
-        fig2.add_trace(go.Scatter(
-            x=df["time_s"], y=df["gen_output_mw"],
-            name="Generator Output", line=dict(color="#FFB300", width=2)
-        ), row=1, col=1)
-
-        # Min load threshold line
-        fig2.add_hline(
-            y=gen_rated_mw * min_load_pct / 100,
-            line_dash="dash", line_color="red",
-            annotation_text="Min Load Threshold (wet stacking risk)",
-            row=1, col=1
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Max Freq Deviation",
+            f"{df['freq_deviation_hz'].abs().max():.3f} Hz",
+            delta="Limit: 0.5 Hz"
+        )
+        c2.metric(
+            "Overspeed Events",
+            f"{int(results['overspeed_events'])}",
+            delta="Target: 0"
+        )
+        c3.metric(
+            "Generator Utilization",
+            f"{df['gen_output_mw'].mean() / gen_rated_mw * 100:.1f}%"
         )
 
+        fig2 = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=(
+                "Generator Output (MW)",
+                "Frequency Deviation (Hz)"
+            )
+        )
         fig2.add_trace(go.Scatter(
-            x=df["time_s"], y=df["freq_deviation_hz"],
-            name="Frequency Deviation", 
+            x=df["time_s"],
+            y=df["gen_output_mw"],
+            name="Generator Output",
+            line=dict(color="#FFB300", width=2)
+        ), row=1, col=1)
+        fig2.add_hline(
+            y=gen_rated_mw * min_load_pct / 100,
+            line_dash="dash",
+            line_color="red",
+            annotation_text="Min Load — wet stacking risk",
+            row=1, col=1
+        )
+        fig2.add_hline(
+            y=gen_rated_mw,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text="Rated Capacity",
+            row=1, col=1
+        )
+        fig2.add_trace(go.Scatter(
+            x=df["time_s"],
+            y=df["freq_deviation_hz"],
+            name="Frequency Deviation",
             line=dict(color="#FF5733", width=2)
         ), row=2, col=1)
-
-        fig2.add_hline(y=0.5,  line_dash="dash",
-                       line_color="orange",
-                       annotation_text="Warning ±0.5 Hz", row=2, col=1)
-        fig2.add_hline(y=-0.5, line_dash="dash",
-                       line_color="orange", row=2, col=1)
-
+        fig2.add_hline(
+            y=0.5, line_dash="dash", line_color="orange",
+            annotation_text="Warning +0.5 Hz", row=2, col=1
+        )
+        fig2.add_hline(
+            y=-0.5, line_dash="dash",
+            line_color="orange", row=2, col=1
+        )
+        fig2.add_hline(
+            y=1.0, line_dash="dash", line_color="red",
+            annotation_text="Critical +1.0 Hz", row=2, col=1
+        )
+        fig2.add_hline(
+            y=-1.0, line_dash="dash",
+            line_color="red", row=2, col=1
+        )
         fig2.update_layout(template="plotly_dark", height=600)
         st.plotly_chart(fig2, use_container_width=True)
 
-    # ── Tab 3: BESS Behavior ────────────────────────────────
+        st.download_button(
+            "⬇️ Download Generator Data CSV",
+            df[["time_s", "gen_output_mw",
+                "freq_deviation_hz"]].to_csv(index=False),
+            "generator_response.csv",
+            "text/csv"
+        )
+
+    # ── Tab 3: BESS Behavior ────────────────────────────────────
     with tab3:
         st.subheader("🔋 BESS State of Charge & Power Flow")
+        st.caption("NVIDIA Test 11: SOC drift must stay <= 5% over simulation period")
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Final SOC",       f"{df['soc_pct'].iloc[-1]:.1f}%")
-        col2.metric("SOC Drift",       f"{results['soc_drift']:.2f}%",
-                    delta="Pass if < 5%" )
-        col3.metric("Energy Absorbed", f"{results['energy_absorbed_mwh']:.2f} MWh")
-        col4.metric("Energy Saved vs Dummy Load",
-                    f"${results['cost_saving_usd']:,.0f}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Final SOC",       f"{df['soc_pct'].iloc[-1]:.1f}%")
+        c2.metric("SOC Drift",       f"{results['soc_drift']:.2f}%",
+                  delta="Pass if <= 5%")
+        c3.metric("Energy Absorbed", f"{results['energy_absorbed_mwh']:.2f} MWh")
+        c4.metric("Cost Saving",     f"${results['cost_saving_usd']:,.0f}")
 
-        fig3 = make_subplots(rows=2, cols=1,
-                             subplot_titles=("SOC Over Time (%)",
-                                             "BESS Power Flow (MW)"))
-
+        fig3 = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=(
+                "BESS State of Charge (%)",
+                "BESS Power Flow — Positive=Charging, Negative=Discharging"
+            )
+        )
         fig3.add_trace(go.Scatter(
-            x=df["time_s"], y=df["soc_pct"],
-            name="SOC", line=dict(color="#00FF88", width=2),
-            fill="tozeroy", fillcolor="rgba(0,255,136,0.1)"
+            x=df["time_s"],
+            y=df["soc_pct"],
+            name="SOC (%)",
+            line=dict(color="#00FF88", width=2),
+            fill="tozeroy",
+            fillcolor="rgba(0,255,136,0.1)"
         ), row=1, col=1)
-
-        fig3.add_hline(y=soc_max, line_dash="dash",
-                       line_color="red",
-                       annotation_text=f"SOC Max {soc_max}%", row=1, col=1)
-        fig3.add_hline(y=soc_min, line_dash="dash",
-                       line_color="orange",
-                       annotation_text=f"SOC Min {soc_min}%", row=1, col=1)
-
+        fig3.add_hline(
+            y=soc_max, line_dash="dash", line_color="red",
+            annotation_text=f"SOC Max {soc_max}%", row=1, col=1
+        )
+        fig3.add_hline(
+            y=soc_min, line_dash="dash", line_color="orange",
+            annotation_text=f"SOC Min {soc_min}%", row=1, col=1
+        )
         fig3.add_trace(go.Scatter(
-            x=df["time_s"], y=df["bess_power_mw"],
-            name="BESS Power (+charge / -discharge)",
+            x=df["time_s"],
+            y=df["bess_power_mw"],
+            name="BESS Power (MW)",
             line=dict(color="#BB86FC", width=2)
         ), row=2, col=1)
-
-        fig3.add_hline(y=0, line_color="white",
-                       line_dash="dot", row=2, col=1)
-
+        fig3.add_hline(
+            y=0, line_color="white",
+            line_dash="dot", row=2, col=1
+        )
         fig3.update_layout(template="plotly_dark", height=600)
         st.plotly_chart(fig3, use_container_width=True)
 
-    # ── Tab 4: BESS vs Dummy Load ───────────────────────────
+        st.download_button(
+            "⬇️ Download BESS Data CSV",
+            df[["time_s", "soc_pct",
+                "bess_power_mw"]].to_csv(index=False),
+            "bess_behavior.csv",
+            "text/csv"
+        )
+
+    # ── Tab 4: BESS vs Dummy Load ───────────────────────────────
     with tab4:
-        st.subheader("⚖️ BESS Charging vs Dummy Load Bank Comparison")
-        st.caption("Shows how much surplus power went to BESS charging vs wasted as heat")
+        st.subheader("⚖️ BESS Charging vs Dummy Load Bank")
+        st.caption("How much surplus power was stored in BESS vs wasted as heat in dummy loads")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Stored in BESS",
+                  f"{results['energy_absorbed_mwh']:.2f} MWh",
+                  delta="Saved")
+        c2.metric("Wasted as Heat",
+                  f"{results['dummy_load_mwh']:.2f} MWh",
+                  delta="Dummy Load")
+        c3.metric("Generator Reduced",
+                  f"{results['gen_reduced_mwh']:.2f} MWh",
+                  delta="Fuel Saved")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.metric("Energy stored in BESS",
-                      f"{results['energy_absorbed_mwh']:.2f} MWh", "✅ Saved")
-            st.metric("Energy wasted in Dummy Load",
-                      f"{results['dummy_load_mwh']:.2f} MWh", "❌ Wasted as heat")
-
-        with col2:
-            # Pie chart
             fig_pie = go.Figure(go.Pie(
-                labels=["BESS Absorbed", "Dummy Load (Wasted)", "Generator Reduced"],
+                labels=[
+                    "BESS Absorbed",
+                    "Dummy Load Wasted",
+                    "Generator Reduced"
+                ],
                 values=[
                     results["energy_absorbed_mwh"],
                     results["dummy_load_mwh"],
                     results["gen_reduced_mwh"]
                 ],
                 marker_colors=["#00FF88", "#FF5733", "#FFB300"],
-                hole=0.4
+                hole=0.45
             ))
             fig_pie.update_layout(
                 title="Surplus Power Distribution",
-                template="plotly_dark", height=350
+                template="plotly_dark",
+                height=380
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-        # Stacked area chart
+        with col2:
+            fig_bar = go.Figure(go.Bar(
+                x=["BESS Absorbed", "Dummy Load Wasted", "Gen Reduced"],
+                y=[
+                    results["energy_absorbed_mwh"],
+                    results["dummy_load_mwh"],
+                    results["gen_reduced_mwh"]
+                ],
+                marker_color=["#00FF88", "#FF5733", "#FFB300"],
+                text=[
+                    f"{results['energy_absorbed_mwh']:.2f} MWh",
+                    f"{results['dummy_load_mwh']:.2f} MWh",
+                    f"{results['gen_reduced_mwh']:.2f} MWh"
+                ],
+                textposition="auto"
+            ))
+            fig_bar.update_layout(
+                title="Energy Balance Comparison",
+                yaxis_title="Energy (MWh)",
+                template="plotly_dark",
+                height=380
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
         fig4 = go.Figure()
         fig4.add_trace(go.Scatter(
-            x=df["time_s"], y=df["bess_charging_mw"],
-            name="BESS Charging (MW)", stackgroup="one",
+            x=df["time_s"],
+            y=df["bess_charging_mw"],
+            name="BESS Charging (MW)",
+            stackgroup="one",
             line=dict(color="#00FF88"),
             fillcolor="rgba(0,255,136,0.4)"
         ))
         fig4.add_trace(go.Scatter(
-            x=df["time_s"], y=df["dummy_load_active_mw"],
-            name="Dummy Load Active (MW)", stackgroup="one",
+            x=df["time_s"],
+            y=df["dummy_load_active_mw"],
+            name="Dummy Load Active (MW)",
+            stackgroup="one",
             line=dict(color="#FF5733"),
             fillcolor="rgba(255,87,51,0.4)"
         ))
         fig4.update_layout(
-            title="Surplus Power Absorption Over Time",
+            title="Surplus Absorption Over Time — BESS vs Dummy Load",
             xaxis_title="Time (seconds)",
             yaxis_title="Power (MW)",
-            template="plotly_dark", height=400
+            template="plotly_dark",
+            height=400
         )
         st.plotly_chart(fig4, use_container_width=True)
 
-    # ── Tab 5: NVIDIA Test Results ──────────────────────────
+        st.download_button(
+            "⬇️ Download Comparison CSV",
+            df[["time_s", "bess_charging_mw",
+                "dummy_load_active_mw"]].to_csv(index=False),
+            "bess_vs_dummy.csv",
+            "text/csv"
+        )
+
+    # ── Tab 5: NVIDIA Test Results ──────────────────────────────
     with tab5:
         st.subheader("✅ NVIDIA BESS Qualification Test Results")
         st.caption("Based on NVIDIA BESS Self-Qualification Guidelines v0.4 — February 2026")
 
+        pass_count = sum(
+            1 for t in tests.values() if t["status"] == "PASS"
+        )
+        total = len(tests)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Tests Passed", f"{pass_count} / {total}")
+        c2.metric(
+            "Overall Status",
+            "QUALIFIED" if pass_count == total else "NOT QUALIFIED"
+        )
+        c3.metric(
+            "Compliance Score",
+            f"{pass_count / total * 100:.0f}%"
+        )
+
+        st.divider()
+
         for test_name, test_result in tests.items():
             status  = test_result["status"]
             icon    = "✅" if status == "PASS" else "❌"
-            color   = "green" if status == "PASS" else "red"
 
-            with st.expander(f"{icon} {test_name} — **{status}**"):
+            with st.expander(
+                f"{icon} {test_name} — {status}",
+                expanded=(status == "FAIL")
+            ):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.markdown("**Criteria:**")
+                    st.markdown("**Required Criteria:**")
                     for k, v in test_result["criteria"].items():
-                        st.write(f"• {k}: `{v}`")
+                        st.write(f"- {k}: `{v}`")
                 with col2:
-                    st.markdown("**Measured:**")
+                    st.markdown("**Measured Values:**")
                     for k, v in test_result["measured"].items():
-                        measured_ok = test_result.get("details", {}).get(k, True)
-                        tick = "✅" if measured_ok else "❌"
+                        ok   = test_result.get("details", {}).get(k, True)
+                        tick = "✅" if ok else "❌"
                         st.write(f"{tick} {k}: `{v}`")
 
-                if "recommendation" in test_result:
-                    st.warning(f"💡 {test_result['recommendation']}")
+                rec = test_result.get("recommendation")
+                if rec and str(rec) != "None":
+                    st.warning(f"💡 Recommendation: {rec}")
+
+        st.divider()
+        summary_rows = []
+        for test_name, test_result in tests.items():
+            for k, v in test_result["measured"].items():
+                summary_rows.append({
+                    "Test":      test_name,
+                    "Parameter": k,
+                    "Measured":  v,
+                    "Status":    test_result["status"]
+                })
+        st.download_button(
+            "⬇️ Download Full Test Results CSV",
+            pd.DataFrame(summary_rows).to_csv(index=False),
+            "nvidia_test_results.csv",
+            "text/csv"
+        )
 
 else:
-    # Show placeholder before simulation runs
     with tab1:
-        st.info("👈 Configure parameters in the sidebar and click **▶️ RUN SIMULATION**")
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Gas_turbine_Wärtsilä.jpg/320px-Gas_turbine_Wärtsilä.jpg",
-                 caption="AI Data Center Gas Generator + BESS System")
+        st.info("👈 Configure parameters in the sidebar and click RUN SIMULATION")
+        st.markdown("### How to Use")
+        st.markdown("1. Set your **AI Data Center** parameters (IT load, GPU count)")
+        st.markdown("2. Configure your **Gas Generator** (rated power, droop, governor speed)")
+        st.markdown("3. Set **BESS** parameters (capacity, power, SOC limits, GFM vs GFL)")
+        st.markdown("4. Set **Dummy Load Bank** capacity")
+        st.markdown("5. Click **RUN SIMULATION**")
+        st.markdown("6. Explore all tabs and download CSV results")
     with tab2:
-        st.info("👈 Run simulation to see generator response")
+        st.info("👈 Run simulation to see generator frequency response")
     with tab3:
-        st.info("👈 Run simulation to see BESS behavior")
+        st.info("👈 Run simulation to see BESS SOC and power flow")
     with tab4:
-        st.info("👈 Run simulation to see BESS vs Dummy Load comparison")
+        st.info("👈 Run simulation to see BESS vs Dummy Load energy comparison")
     with tab5:
         st.info("👈 Run simulation to see NVIDIA qualification test results")
