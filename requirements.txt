@@ -4,3 +4,4 @@ pandas
 scipy
 plotly
 pymgrid
+requests
